@@ -25,7 +25,7 @@ class LoginRequest(BaseSchema):
 
 class RegisterRequest(BaseSchema):
     email: EmailStr
-    username: str = Field(..., min_length=3, max_length=50, regex="^[a-zA-Z0-9_-]+$")
+    username: str = Field(..., min_length=3, max_length=50, pattern="^[a-zA-Z0-9_-]+$")
     password: str = Field(..., min_length=8, max_length=100)
     full_name: Optional[str] = Field(None, max_length=255)
     terms_accepted: bool = True
@@ -110,7 +110,7 @@ class TwoFactorLoginRequest(BaseSchema):
 
 # Social authentication schemas
 class SocialAuthRequest(BaseSchema):
-    provider: str = Field(..., regex="^(google|github|discord)$")
+    provider: str = Field(..., pattern="^(google|github|discord)$")
     access_token: str
 
 class SocialAuthResponse(BaseSchema):
@@ -167,3 +167,9 @@ class LoginResponse(BaseSchema):
 class LogoutResponse(BaseSchema):
     message: str = "Successfully logged out"
     revoked_sessions: int = 0
+
+# Moved from app.core.security
+class TokenPayload(BaseSchema):
+    sub: Optional[str] = None
+    type: Optional[str] = None # e.g. "access", "refresh"
+    scopes: List[str] = []

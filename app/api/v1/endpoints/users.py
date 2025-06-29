@@ -1,8 +1,8 @@
 from typing import List, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession # Changed import
 
-from app.core.database import get_db
+from app.db.database import get_async_db # Changed import
 from app.crud.user import user_crud
 from app.crud.audio_file import audio_file_crud
 from app.crud.agent_session import agent_session_crud
@@ -17,7 +17,7 @@ from app.schemas.user import (
     SubscriptionInfo
 )
 from app.schemas.common import PaginatedResponse, SuccessResponse
-from app.core.security import get_current_user, get_current_superuser
+from app.api.deps import get_current_user, get_current_active_superuser # Changed import
 from app.models.user import User
 import structlog
 
@@ -36,26 +36,26 @@ async def get_current_user_profile(
 async def update_current_user(
     user_update: UserUpdate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Update current user profile"""
-    updated_user = user_crud.update(db, db_obj=current_user, obj_in=user_update)
+    updated_user = await user_crud.update(db, db_obj=current_user, obj_in=user_update)
     logger.info("User profile updated", user_id=str(current_user.id))
     return updated_user
 
 @router.get("/me/stats", response_model=UserStats)
 async def get_user_stats(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Get user statistics"""
-    stats = user_crud.get_user_stats(db, user=current_user)
+    stats = await user_crud.get_user_stats(db, user_id=current_user.id) # Pass user_id
     return UserStats(**stats)
 
 @router.delete("/me", response_model=SuccessResponse)
 async def delete_current_user(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Delete current user account"""
     # TODO: Implement proper data deletion workflow
@@ -64,7 +64,7 @@ async def delete_current_user(
     # - Remove from billing system
     # - Send confirmation email
     
-    user_crud.remove(db, id=current_user.id)
+    await user_crud.remove(db, id=current_user.id)
     logger.info("User account deleted", user_id=str(current_user.id))
     
     return SuccessResponse(

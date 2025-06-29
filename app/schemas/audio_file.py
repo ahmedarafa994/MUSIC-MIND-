@@ -13,7 +13,7 @@ class AudioFileBase(BaseSchema):
     key: Optional[str] = Field(None, max_length=10)
     time_signature: Optional[str] = Field(None, max_length=10)
     is_public: bool = False
-    tags: Optional[List[str]] = Field(None, max_items=10)
+    tags: Optional[List[str]] = Field(None, max_length=10)
 
 class AudioFileCreate(AudioFileBase):
     pass
@@ -26,7 +26,7 @@ class AudioFileUpdate(BaseSchema):
     key: Optional[str] = Field(None, max_length=10)
     time_signature: Optional[str] = Field(None, max_length=10)
     is_public: Optional[bool] = None
-    tags: Optional[List[str]] = Field(None, max_items=10)
+    tags: Optional[List[str]] = Field(None, max_length=10)
 
 class AudioFileResponse(AudioFileBase):
     id: uuid.UUID
@@ -109,7 +109,7 @@ class AudioFileUploadResponse(BaseSchema):
 # Audio processing schemas
 class AudioProcessingRequest(BaseSchema):
     audio_file_id: uuid.UUID
-    processing_type: str = Field(..., pattern="^(normalize|enhance|master|analyze)$")
+    processing_type: str = Field(..., pattern="^(normalize|enhance|master|analyze)$") # Already correct
     parameters: Optional[Dict[str, Any]] = None
 
 class AudioProcessingResponse(BaseSchema):
@@ -121,7 +121,7 @@ class AudioProcessingResponse(BaseSchema):
 # Audio analysis schemas
 class AudioAnalysisRequest(BaseSchema):
     audio_file_id: uuid.UUID
-    analysis_type: str = Field(..., pattern="^(full|basic|spectral|rhythm|harmony)$")
+    analysis_type: str = Field(..., pattern="^(full|basic|spectral|rhythm|harmony)$") # Already correct
     include_visualization: bool = False
 
 class AudioAnalysisResponse(BaseSchema):
@@ -158,8 +158,8 @@ class MasteringResponse(BaseSchema):
 # Audio format conversion schemas
 class FormatConversionRequest(BaseSchema):
     audio_file_id: uuid.UUID
-    target_format: str = Field(..., pattern="^(mp3|wav|flac|aac|ogg)$")
-    quality: str = Field(default="high", pattern="^(low|medium|high|lossless)$")
+    target_format: str = Field(..., pattern="^(mp3|wav|flac|aac|ogg)$") # Already correct
+    quality: str = Field(default="high", pattern="^(low|medium|high|lossless)$") # Already correct
     sample_rate: Optional[int] = Field(None, ge=8000, le=192000)
     bit_rate: Optional[int] = Field(None, ge=64, le=320)
 
@@ -185,7 +185,7 @@ class AudioFileSearchParams(BaseSchema):
     is_public: Optional[bool] = None
     created_after: Optional[datetime] = None
     created_before: Optional[datetime] = None
-    tags: Optional[List[str]] = Field(None, max_items=5)
+    tags: Optional[List[str]] = Field(None, max_length=5)
 
 # Audio file statistics
 class AudioFileStats(BaseSchema):
@@ -229,8 +229,8 @@ class AudioFileVersionHistory(BaseSchema):
 
 # Batch operations
 class BatchAudioOperation(BaseSchema):
-    file_ids: List[uuid.UUID] = Field(..., min_items=1, max_items=50)
-    operation: str = Field(..., pattern="^(delete|archive|make_public|make_private|analyze)$")
+    file_ids: List[uuid.UUID] = Field(..., min_length=1, max_length=50) # Changed min_items/max_items to min_length/max_length for list of UUIDs
+    operation: str = Field(..., pattern="^(delete|archive|make_public|make_private|analyze)$") # Already correct
     parameters: Optional[Dict[str, Any]] = None
 
 class BatchAudioOperationResult(BaseSchema):

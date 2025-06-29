@@ -1,15 +1,15 @@
 from typing import Optional, List, Dict, Any
-from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, func, desc, update as sqlalchemy_update
+from sqlalchemy.ext.asyncio import AsyncSession # Removed Session
+from sqlalchemy import select, and_, or_, func, desc # Removed update as sqlalchemy_update for now
 from datetime import datetime, timedelta
 import uuid
+from fastapi import HTTPException, status # Added import here
 
 from app.models.user import User
-from app.models.audio_file import AudioFile
-from app.models.agent_session import AgentSession
+from app.models.audio_file import AudioFile # Re-added as it's used in get_user_stats
+from app.models.agent_session import AgentSession # Re-added as it's used in get_user_stats
 from app.schemas.user import UserCreate, UserUpdate
-from app.core.security import get_password_hash, verify_password # Assuming these are synchronous
+from app.core.password_utils import get_password_hash, verify_password
 from app.crud.base import CRUDBase
 import structlog
 
@@ -259,5 +259,4 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
 
 user = CRUDUser(User)
 
-# Need to import status for HTTPException if used within this file
-from fastapi import HTTPException, status
+# Moved HTTPException, status import to the top

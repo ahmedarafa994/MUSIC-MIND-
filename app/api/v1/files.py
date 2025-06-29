@@ -1,17 +1,17 @@
 from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Query, BackgroundTasks
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession # Changed import
 import uuid
 import os
 import aiofiles
 import hashlib
 from datetime import datetime
 
-from app.db.database import get_db
+from app.db.database import get_async_db # Changed import
 from app.crud import audio_file as crud_audio_file
 from app.schemas import AudioFileResponse, AudioFileDetail, AudioFileUpdate, FileUploadResponse
-from app.core.security import get_current_active_user
+from app.api.deps import get_current_active_user # Changed import
 from app.core.config import settings
 from app.models.user import User
 from app.models.audio_file import AudioFile
@@ -66,7 +66,7 @@ def process_audio_metadata(file_path: str) -> dict:
 @router.post("/upload", response_model=FileUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_file(
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_active_user),
     background_tasks: BackgroundTasks
@@ -108,7 +108,7 @@ async def upload_file(
     file_hash = calculate_file_hash(file_path)
     
     # Check for duplicate files
-    existing_file = crud_audio_file.get_by_hash(db, file_hash=file_hash)
+    existing_file = await crud_audio_file.get_by_hash(db, file_hash=file_hash) # Added await
     if existing_file and existing_file.user_id == current_user.id:
         # Remove uploaded file and return existing
         os.remove(file_path)
@@ -134,8 +134,8 @@ async def upload_file(
     
     audio_file = AudioFile(**audio_file_data, user_id=current_user.id, id=file_id)
     db.add(audio_file)
-    db.commit()
-    db.refresh(audio_file)
+    await db.commit() # Added await
+    await db.refresh(audio_file) # Added await
     
     return FileUploadResponse(
         file_id=audio_file.id,
@@ -144,8 +144,8 @@ async def upload_file(
     )
 
 @router.get("/", response_model=List[AudioFileResponse])
-def read_files(
-    db: Session = Depends(get_db),
+async def read_files( # Added async
+    db: AsyncSession = Depends(get_async_db), # Changed Session to AsyncSession
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_active_user),
@@ -153,44 +153,44 @@ def read_files(
     """
     Retrieve user's audio files
     """
-    files = crud_audio_file.get_by_user(db, user_id=current_user.id, skip=skip, limit=limit)
+    files = await crud_audio_file.get_by_user(db, user_id=current_user.id, skip=skip, limit=limit) # Added await
     return files
 
 @router.get("/public", response_model=List[AudioFileResponse])
-def read_public_files(
-    db: Session = Depends(get_db),
+async def read_public_files( # Added async
+    db: AsyncSession = Depends(get_async_db), # Changed Session to AsyncSession
     skip: int = 0,
     limit: int = 100,
 ) -> Any:
     """
     Retrieve public audio files
     """
-    files = crud_audio_file.get_public_files(db, skip=skip, limit=limit)
+    files = await crud_audio_file.get_public_files(db, skip=skip, limit=limit) # Added await
     return files
 
 @router.get("/{file_id}", response_model=AudioFileDetail)
-def read_file(
+async def read_file( # Added async
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db), # Changed Session to AsyncSession
     file_id: uuid.UUID,
     current_user: User = Depends(get_current_active_user),
 ) -> Any:
     """
     Get audio file by ID
     """
-    audio_file = crud_audio_file.get(db, id=file_id)
+    audio_file = await crud_audio_file.get(db, id=file_id) # Added await
     if not audio_file:
         raise HTTPException(status_code=404, detail="Audio file not found")
     
-    if not audio_file.can_be_accessed_by_user(current_user.id):
+    if not audio_file.can_be_accessed_by_user(current_user.id): # Model method, likely sync
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     return audio_file
 
 @router.put("/{file_id}", response_model=AudioFileResponse)
-def update_file(
+async def update_file( # Added async
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db), # Changed Session to AsyncSession
     file_id: uuid.UUID,
     file_in: AudioFileUpdate,
     current_user: User = Depends(get_current_active_user),
@@ -198,27 +198,27 @@ def update_file(
     """
     Update audio file
     """
-    audio_file = crud_audio_file.get(db, id=file_id)
+    audio_file = await crud_audio_file.get(db, id=file_id) # Added await
     if not audio_file:
         raise HTTPException(status_code=404, detail="Audio file not found")
     
     if audio_file.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    audio_file = crud_audio_file.update(db, db_obj=audio_file, obj_in=file_in)
+    audio_file = await crud_audio_file.update(db, db_obj=audio_file, obj_in=file_in) # Added await
     return audio_file
 
 @router.delete("/{file_id}")
-def delete_file(
+async def delete_file( # Added async
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db), # Changed Session to AsyncSession
     file_id: uuid.UUID,
     current_user: User = Depends(get_current_active_user),
 ) -> Any:
     """
     Delete audio file
     """
-    audio_file = crud_audio_file.get(db, id=file_id)
+    audio_file = await crud_audio_file.get(db, id=file_id) # Added await
     if not audio_file:
         raise HTTPException(status_code=404, detail="Audio file not found")
     
@@ -226,7 +226,7 @@ def delete_file(
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     # Soft delete
-    crud_audio_file.soft_delete(db, file_id=file_id)
+    await crud_audio_file.soft_delete(db, file_id=file_id) # Added await
     
     return {"message": "Audio file deleted successfully"}
 

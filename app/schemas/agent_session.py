@@ -64,11 +64,11 @@ class MusicGenerationRequest(BaseSchema):
     duration: Optional[int] = Field(None, ge=10, le=300)  # seconds
     key: Optional[str] = Field(None, max_length=10)
     time_signature: Optional[str] = Field(None, max_length=10)
-    instruments: Optional[List[str]] = Field(None, max_items=10)
+    instruments: Optional[List[str]] = Field(None, max_length=10) # Changed max_items to max_length
     style: Optional[str] = Field(None, max_length=100)
     reference_file_id: Optional[uuid.UUID] = None
     creativity_level: float = Field(default=0.7, ge=0.0, le=1.0)
-    quality_preset: str = Field(default="balanced", pattern="^(fast|balanced|high_quality)$")
+    quality_preset: str = Field(default="balanced", pattern="^(fast|balanced|high_quality)$") # Already correct
 
 class MusicGenerationResponse(BaseSchema):
     session_id: uuid.UUID
@@ -80,10 +80,10 @@ class MusicGenerationResponse(BaseSchema):
 # Audio enhancement schemas
 class AudioEnhancementRequest(BaseSchema):
     audio_file_id: uuid.UUID
-    enhancement_type: str = Field(..., pattern="^(denoise|enhance|restore|upscale)$")
+    enhancement_type: str = Field(..., pattern="^(denoise|enhance|restore|upscale)$") # Already correct
     intensity: float = Field(default=0.5, ge=0.0, le=1.0)
     preserve_dynamics: bool = True
-    target_quality: str = Field(default="high", pattern="^(standard|high|studio)$")
+    target_quality: str = Field(default="high", pattern="^(standard|high|studio)$") # Already correct
     custom_parameters: Optional[Dict[str, Any]] = None
 
 class AudioEnhancementResponse(BaseSchema):
@@ -161,7 +161,7 @@ class SessionTemplate(BaseSchema):
     default_parameters: Dict[str, Any]
     estimated_cost: Optional[float]
     estimated_duration: Optional[int]  # seconds
-    tags: Optional[List[str]] = Field(None, max_items=5)
+    tags: Optional[List[str]] = Field(None, max_length=5)
 
 class SessionTemplateResponse(SessionTemplate):
     id: uuid.UUID
@@ -173,8 +173,8 @@ class SessionTemplateResponse(SessionTemplate):
 
 # Batch session operations
 class BatchSessionOperation(BaseSchema):
-    session_ids: List[uuid.UUID] = Field(..., min_items=1, max_items=20)
-    operation: str = Field(..., pattern="^(cancel|retry|delete|archive)$")
+    session_ids: List[uuid.UUID] = Field(..., min_length=1, max_length=20) # Changed min_items/max_items to min_length/max_length
+    operation: str = Field(..., pattern="^(cancel|retry|delete|archive)$") # Already correct
     reason: Optional[str] = Field(None, max_length=500)
 
 class BatchSessionOperationResult(BaseSchema):

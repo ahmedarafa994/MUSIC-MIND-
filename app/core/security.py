@@ -3,30 +3,25 @@ from typing import Any, Union, Optional
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from fastapi import HTTPException, status, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordBearer # Added OAuth2PasswordBearer
-from sqlalchemy.ext.asyncio import AsyncSession # Changed to AsyncSession
-from pydantic import BaseModel # Added for TokenPayload
+# HTTPBearer, HTTPAuthorizationCredentials removed as reusable_oauth2 is moved
+from fastapi.security import OAuth2PasswordBearer
+# from sqlalchemy.ext.asyncio import AsyncSession # No longer needed directly here
+# from pydantic import BaseModel # TokenPayload moved
 from app.core.config import settings
-from app.core.database import get_db # For async
-from app.crud.user import user as user_crud # Ensure this matches your crud instantiation
-from app.models.user import User
+# from app.core.database import get_db # No longer needed here
+# from app.crud.user import user as user_crud # Will be used in deps
+# from app.models.user import User # Will be used in deps
+from app.schemas.auth import TokenPayload # Import TokenPayload from new location
+from typing import Dict, List # Added Dict, List for to_encode type hint
 import structlog
 
 logger = structlog.get_logger()
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# pwd_context and password hashing functions moved to app.core.password_utils
 
-# OAuth2 scheme
-reusable_oauth2 = OAuth2PasswordBearer(
-    tokenUrl=f"{settings.API_V1_STR}/auth/login",
-    scopes={"me": "Read information about the current user."}
-)
+# reusable_oauth2 moved to app.api.deps
 
-class TokenPayload(BaseModel):
-    sub: Optional[str] = None
-    type: Optional[str] = None
-    scopes: List[str] = []
+# TokenPayload class moved to app.schemas.auth
 
 
 def create_access_token(
@@ -84,16 +79,12 @@ def _verify_token_payload(token: str) -> TokenPayload:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify password against hash"""
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password: str) -> str:
-    """Hash password"""
-    return pwd_context.hash(password)
+# verify_password and get_password_hash moved to app.core.password_utils
 
 def validate_password(password: str) -> bool:
     """Validate password strength"""
+    # This function uses settings, not pwd_context, so it can remain here
+    # or be moved to password_utils if preferred. Keeping here for now.
     if len(password) < settings.PASSWORD_MIN_LENGTH:
         return False
     
@@ -111,59 +102,9 @@ def validate_password(password: str) -> bool:
     
     return True
 
-async def get_current_user(
-    token: str = Depends(reusable_oauth2),
-    db: AsyncSession = Depends(get_db)
-) -> User:
-    """Get current authenticated user from access token."""
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials - user retrieval",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    
-    token_payload = _verify_token_payload(token)
-        
-    if token_payload.sub is None or token_payload.type != "access":
-        logger.warning("Invalid token payload for access", payload_sub=token_payload.sub, payload_type=token_payload.type)
-        raise credentials_exception
-    
-    user = await user_crud.get(db, id=token_payload.sub)
-    if user is None:
-        logger.warning("User from token not found in DB", user_id_from_token=token_payload.sub)
-        raise credentials_exception
-    
-    if not user.is_active:
-        logger.warning("Attempt to use token for inactive user", user_id=user.id)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
-    
-    if hasattr(user, 'is_account_locked') and user.is_account_locked():
-        logger.warning("Attempt to use token for locked account", user_id=user.id)
-        raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Account is locked")
-    
-    logger.debug("Current user retrieved", user_id=user.id)
-    return user
+# get_current_user, get_current_active_user, get_current_active_superuser moved to app.api.deps.py
 
-async def get_current_active_user(
-    current_user: User = Depends(get_current_user),
-) -> User:
-    """Get current active user (relies on get_current_user to have already checked active status)"""
-    return current_user
-
-async def get_current_active_superuser(
-    current_user: User = Depends(get_current_active_user),
-) -> User:
-    """Get current active superuser"""
-    if not current_user.is_superuser:
-        logger.warning("Non-superuser attempted admin access", user_id=current_user.id)
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="The user doesn't have enough privileges"
-        )
-    logger.debug("Superuser access granted", user_id=current_user.id)
-    return current_user
-
-def check_user_permissions(user: User, required_permission: str) -> bool:
+def check_user_permissions(user: "User", required_permission: str) -> bool: # Type hint User with quotes for forward ref if User not imported
     """Check if user has required permission"""
     # Implement permission checking logic based on your needs
     if user.is_superuser:

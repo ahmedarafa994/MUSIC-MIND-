@@ -1,88 +1,95 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import UUID, JSON
+from sqlalchemy import Integer, String, DateTime, Boolean, Text, Float, ForeignKey, func
+from sqlalchemy.orm import relationship, Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB as PG_JSONB
 from app.db.database import Base
 import uuid
 from datetime import datetime
-import os
+from typing import Optional, List, Any, TYPE_CHECKING # Added Optional, List, Any
+import os # os was unused, can be removed if not needed elsewhere
+
+if TYPE_CHECKING:
+    from .user import User
+    from .agent_session import AgentSession
+    # For self-referential relationship if versions is a list of AudioFile
+    # from .audio_file import AudioFile as AudioFileVersion
 
 class AudioFile(Base):
     __tablename__ = "audio_files"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    # id, created_at, updated_at are inherited from Base
+
+    user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
     
     # File information
-    filename = Column(String(255), nullable=False)
-    original_filename = Column(String(255), nullable=False)
-    file_path = Column(String(500), nullable=False)
-    file_size = Column(Integer, nullable=False)  # in bytes
-    mime_type = Column(String(100), nullable=False)
-    file_hash = Column(String(64), nullable=True)  # SHA-256 hash for deduplication
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False)  # in bytes
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    file_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # SHA-256 hash for deduplication
     
     # Audio metadata
-    duration = Column(Float, nullable=True)  # in seconds
-    sample_rate = Column(Integer, nullable=True)
-    bit_rate = Column(Integer, nullable=True)
-    channels = Column(Integer, nullable=True)
-    format = Column(String(50), nullable=True)  # mp3, wav, flac, etc.
-    codec = Column(String(50), nullable=True)
+    duration: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # in seconds
+    sample_rate: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    bit_rate: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    channels: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    format: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # mp3, wav, flac, etc.
+    codec: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     
     # Processing status
-    status = Column(String(50), default="uploaded")  # uploaded, processing, completed, failed, queued
-    processing_progress = Column(Integer, default=0)  # 0-100
-    error_message = Column(Text, nullable=True)
-    processing_started_at = Column(DateTime(timezone=True), nullable=True)
-    processing_completed_at = Column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="uploaded")  # uploaded, processing, completed, failed, queued
+    processing_progress: Mapped[int] = mapped_column(Integer, default=0)  # 0-100
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    processing_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     # Music generation metadata
-    genre = Column(String(100), nullable=True)
-    mood = Column(String(100), nullable=True)
-    tempo = Column(Integer, nullable=True)  # BPM
-    key = Column(String(10), nullable=True)  # C, D, E, etc.
-    time_signature = Column(String(10), nullable=True)  # 4/4, 3/4, etc.
+    genre: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    mood: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    tempo: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # BPM
+    key: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # C, D, E, etc.
+    time_signature: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # 4/4, 3/4, etc.
     
     # AI processing metadata
-    ai_model_used = Column(String(100), nullable=True)
-    processing_parameters = Column(JSON, nullable=True)
-    quality_score = Column(Float, nullable=True)  # 0.0-1.0
-    mastering_preset = Column(String(100), nullable=True)
-    effects_applied = Column(JSON, nullable=True)
+    ai_model_used: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    processing_parameters: Mapped[Optional[Dict[str, Any]]] = mapped_column(PG_JSONB, nullable=True)
+    quality_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0.0-1.0
+    mastering_preset: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    effects_applied: Mapped[Optional[List[str]]] = mapped_column(PG_JSONB, nullable=True) # Assuming JSONB for list of strings
     
     # Audio analysis results
-    loudness_lufs = Column(Float, nullable=True)
-    peak_db = Column(Float, nullable=True)
-    dynamic_range = Column(Float, nullable=True)
-    spectral_centroid = Column(Float, nullable=True)
-    zero_crossing_rate = Column(Float, nullable=True)
+    loudness_lufs: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    peak_db: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    dynamic_range: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    spectral_centroid: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    zero_crossing_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     
     # File management
-    is_public = Column(Boolean, default=False)
-    is_deleted = Column(Boolean, default=False)
-    download_count = Column(Integer, default=0)
-    play_count = Column(Integer, default=0)
-    share_count = Column(Integer, default=0)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    download_count: Mapped[int] = mapped_column(Integer, default=0)
+    play_count: Mapped[int] = mapped_column(Integer, default=0)
+    share_count: Mapped[int] = mapped_column(Integer, default=0)
     
     # Versioning
-    version = Column(Integer, default=1)
-    parent_file_id = Column(UUID(as_uuid=True), ForeignKey("audio_files.id"), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    parent_file_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("audio_files.id"), nullable=True)
     
     # Storage and CDN
-    storage_provider = Column(String(50), default="local")  # local, s3, gcs, etc.
-    cdn_url = Column(String(500), nullable=True)
-    backup_path = Column(String(500), nullable=True)
+    storage_provider: Mapped[str] = mapped_column(String(50), default="local")  # local, s3, gcs, etc.
+    cdn_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    backup_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    last_accessed_at = Column(DateTime(timezone=True), nullable=True)
-    expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_accessed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     # Relationships
-    user = relationship("User", back_populates="audio_files")
-    agent_sessions = relationship("AgentSession", back_populates="audio_file")
-    parent_file = relationship("AudioFile", remote_side=[id], backref="versions")
+    user: Mapped["User"] = relationship("User", back_populates="audio_files")
+    agent_sessions: Mapped[List["AgentSession"]] = relationship("AgentSession", back_populates="audio_file")
+    # For self-referential relationship, if 'versions' is a list of child AudioFile objects.
+    versions: Mapped[List["AudioFile"]] = relationship("AudioFile", backref="parent_file", remote_side=[Base.id])
+
 
     def __repr__(self):
         return f"<AudioFile(id={self.id}, filename={self.filename}, status={self.status})>"

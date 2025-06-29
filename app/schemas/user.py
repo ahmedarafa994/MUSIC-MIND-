@@ -7,7 +7,7 @@ from .common import BaseSchema, SubscriptionTier
 # Base user schemas
 class UserBase(BaseSchema):
     email: EmailStr
-    username: str = Field(..., min_length=3, max_length=50, pattern="^[a-zA-Z0-9_-]+$")
+    username: str = Field(..., min_length=3, max_length=50, pattern="^[a-zA-Z0-9_-]+$") # Already correct
     full_name: Optional[str] = Field(None, max_length=255)
     bio: Optional[str] = Field(None, max_length=1000)
     phone_number: Optional[str] = Field(None, max_length=20)
@@ -105,7 +105,7 @@ class SubscriptionInfo(BaseSchema):
 
 # User preferences
 class UserPreferences(BaseSchema):
-    theme: str = Field(default="light", pattern="^(light|dark|auto)$")
+    theme: str = Field(default="light", pattern="^(light|dark|auto)$") # Already correct
     language: str = Field(default="en", max_length=5)
     notifications_email: bool = True
     notifications_push: bool = True
@@ -194,8 +194,8 @@ class UserDeletionRequest(BaseSchema):
 
 # Bulk user operations (admin only)
 class BulkUserOperation(BaseSchema):
-    user_ids: List[uuid.UUID] = Field(..., min_items=1, max_items=100)
-    operation: str = Field(..., pattern="^(activate|deactivate|verify|unverify|delete)$")
+    user_ids: List[uuid.UUID] = Field(..., min_length=1, max_length=100)
+    operation: str = Field(..., pattern="^(activate|deactivate|verify|unverify|delete)$") # Already correct
     reason: Optional[str] = Field(None, max_length=500)
 
 class BulkUserOperationResult(BaseSchema):

@@ -1,11 +1,16 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import UUID, JSON
+from sqlalchemy import Integer, String, DateTime, Boolean, Text, Float, ForeignKey, func
+from sqlalchemy.orm import relationship, Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB as PG_JSONB
 from app.db.database import Base
 import uuid
 from datetime import datetime
 from enum import Enum
+from typing import Optional, List, Dict, Any, TYPE_CHECKING # Added Optional, List, Dict, Any
+
+if TYPE_CHECKING:
+    from .user import User
+    from .audio_file import AudioFile
+    from .agent_session import AgentTaskExecution # Self-reference for task_executions - uncommented
 
 class SessionStatus(str, Enum):
     ACTIVE = "active"
@@ -25,67 +30,66 @@ class TaskStatus(str, Enum):
 class AgentSession(Base):
     __tablename__ = "agent_sessions"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
-    audio_file_id = Column(UUID(as_uuid=True), ForeignKey("audio_files.id"), nullable=True, index=True)
+    # id, created_at, updated_at are inherited from Base
+
+    user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    audio_file_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("audio_files.id"), nullable=True, index=True)
     
     # Session metadata
-    session_type = Column(String(100), nullable=False)  # music_generation, mastering, analysis
-    status = Column(String(50), default=SessionStatus.ACTIVE)
-    priority = Column(Integer, default=5)  # 1-10, higher is more priority
+    session_type: Mapped[str] = mapped_column(String(100), nullable=False)  # music_generation, mastering, analysis
+    status: Mapped[SessionStatus] = mapped_column(String(50), default=SessionStatus.ACTIVE) # Uses Enum
+    priority: Mapped[int] = mapped_column(Integer, default=5)  # 1-10, higher is more priority
     
     # Request information
-    user_prompt = Column(Text, nullable=False)
-    parsed_requirements = Column(JSON, nullable=True)
-    selected_tools = Column(JSON, nullable=True)  # List of tools selected by agent
-    execution_plan = Column(JSON, nullable=True)  # Planned execution steps
+    user_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    parsed_requirements: Mapped[Optional[Dict[str, Any]]] = mapped_column(PG_JSONB, nullable=True)
+    selected_tools: Mapped[Optional[List[str]]] = mapped_column(PG_JSONB, nullable=True)  # List of tools selected by agent
+    execution_plan: Mapped[Optional[Dict[str, Any]]] = mapped_column(PG_JSONB, nullable=True)  # Planned execution steps
     
     # Execution tracking
-    total_tasks = Column(Integer, default=0)
-    completed_tasks = Column(Integer, default=0)
-    failed_tasks = Column(Integer, default=0)
-    cancelled_tasks = Column(Integer, default=0)
+    total_tasks: Mapped[int] = mapped_column(Integer, default=0)
+    completed_tasks: Mapped[int] = mapped_column(Integer, default=0)
+    failed_tasks: Mapped[int] = mapped_column(Integer, default=0)
+    cancelled_tasks: Mapped[int] = mapped_column(Integer, default=0)
     
     # Performance metrics
-    total_execution_time = Column(Float, nullable=True)  # in seconds
-    queue_time = Column(Float, nullable=True)  # Time spent in queue
-    processing_time = Column(Float, nullable=True)  # Actual processing time
+    total_execution_time: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # in seconds
+    queue_time: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # Time spent in queue
+    processing_time: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # Actual processing time
     
     # Cost tracking
-    total_cost = Column(Float, default=0.0)  # in USD
-    api_costs = Column(JSON, nullable=True)  # Breakdown by service
-    tokens_used = Column(Integer, default=0)
-    compute_units_used = Column(Float, default=0.0)
+    total_cost: Mapped[float] = mapped_column(Float, default=0.0)  # in USD
+    api_costs: Mapped[Optional[Dict[str, float]]] = mapped_column(PG_JSONB, nullable=True)  # Breakdown by service
+    tokens_used: Mapped[int] = mapped_column(Integer, default=0)
+    compute_units_used: Mapped[float] = mapped_column(Float, default=0.0)
     
     # Results
-    output_file_paths = Column(JSON, nullable=True)  # List of generated file paths
-    final_response = Column(Text, nullable=True)
-    quality_metrics = Column(JSON, nullable=True)
-    additional_metadata = Column(JSON, nullable=True)  # Additional session metadata
+    output_file_paths: Mapped[Optional[List[str]]] = mapped_column(PG_JSONB, nullable=True)  # List of generated file paths
+    final_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    quality_metrics: Mapped[Optional[Dict[str, Any]]] = mapped_column(PG_JSONB, nullable=True)
+    additional_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(PG_JSONB, nullable=True)  # Additional session metadata
     
     # Error handling
-    error_message = Column(Text, nullable=True)
-    error_traceback = Column(Text, nullable=True)
-    error_code = Column(String(50), nullable=True)
-    retry_count = Column(Integer, default=0)
-    max_retries = Column(Integer, default=3)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_traceback: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, default=3)
     
     # Resource limits
-    max_execution_time = Column(Integer, default=3600)  # seconds
-    max_memory_mb = Column(Integer, default=1024)
-    max_file_size_mb = Column(Integer, default=100)
+    max_execution_time: Mapped[int] = mapped_column(Integer, default=3600)  # seconds
+    max_memory_mb: Mapped[int] = mapped_column(Integer, default=1024)
+    max_file_size_mb: Mapped[int] = mapped_column(Integer, default=100)
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    started_at = Column(DateTime(timezone=True), nullable=True)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
-    expires_at = Column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     # Relationships
-    user = relationship("User", back_populates="agent_sessions")
-    audio_file = relationship("AudioFile", back_populates="agent_sessions")
-    task_executions = relationship("AgentTaskExecution", back_populates="session", cascade="all, delete-orphan")
+    user: Mapped["User"] = relationship("User", back_populates="agent_sessions")
+    audio_file: Mapped[Optional["AudioFile"]] = relationship("AudioFile", back_populates="agent_sessions")
+    task_executions: Mapped[List["AgentTaskExecution"]] = relationship("AgentTaskExecution", back_populates="session", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<AgentSession(id={self.id}, type={self.session_type}, status={self.status})>"
@@ -196,43 +200,43 @@ class AgentSession(Base):
 class AgentTaskExecution(Base):
     __tablename__ = "agent_task_executions"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("agent_sessions.id"), nullable=False, index=True)
+    # id, created_at, updated_at are inherited from Base (updated_at might not be used here, but Base has it)
+
+    session_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("agent_sessions.id"), nullable=False, index=True)
     
     # Task information
-    task_name = Column(String(200), nullable=False)
-    task_type = Column(String(100), nullable=False)  # tool_execution, api_call, processing
-    tool_name = Column(String(100), nullable=True)
-    status = Column(String(50), default=TaskStatus.PENDING)
+    task_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    task_type: Mapped[str] = mapped_column(String(100), nullable=False)  # tool_execution, api_call, processing
+    tool_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    status: Mapped[TaskStatus] = mapped_column(String(50), default=TaskStatus.PENDING) # Uses Enum
     
     # Execution details
-    input_data = Column(JSON, nullable=True)
-    output_data = Column(JSON, nullable=True)
-    parameters = Column(JSON, nullable=True)
+    input_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(PG_JSONB, nullable=True)
+    output_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(PG_JSONB, nullable=True)
+    parameters: Mapped[Optional[Dict[str, Any]]] = mapped_column(PG_JSONB, nullable=True)
     
     # Performance metrics
-    execution_time = Column(Float, nullable=True)  # in seconds
-    memory_used_mb = Column(Float, nullable=True)
-    cpu_usage_percent = Column(Float, nullable=True)
+    execution_time: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # in seconds
+    memory_used_mb: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    cpu_usage_percent: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     
     # Cost tracking
-    cost = Column(Float, default=0.0)
-    tokens_used = Column(Integer, default=0)
-    api_calls_made = Column(Integer, default=0)
+    cost: Mapped[float] = mapped_column(Float, default=0.0)
+    tokens_used: Mapped[int] = mapped_column(Integer, default=0)
+    api_calls_made: Mapped[int] = mapped_column(Integer, default=0)
     
     # Error handling
-    error_message = Column(Text, nullable=True)
-    error_traceback = Column(Text, nullable=True)
-    error_code = Column(String(50), nullable=True)
-    retry_count = Column(Integer, default=0)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_traceback: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    started_at = Column(DateTime(timezone=True), nullable=True)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     # Relationships
-    session = relationship("AgentSession", back_populates="task_executions")
+    session: Mapped["AgentSession"] = relationship("AgentSession", back_populates="task_executions")
 
     def __repr__(self):
         return f"<AgentTaskExecution(id={self.id}, task={self.task_name}, status={self.status})>"

@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     
     # Database settings
     DATABASE_URL: str = "sqlite+aiosqlite:///./music_mastering.db" # Use async driver
+    DB_POOL_SIZE: int = 5 # Default for SQLite, PostgreSQL might need more
+    DB_MAX_OVERFLOW: int = 10
     
     # Redis settings (for caching and sessions)
     REDIS_URL: Optional[str] = "redis://localhost:6379/0"

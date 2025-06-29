@@ -1,46 +1,46 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Integer, String, DateTime, Boolean, ForeignKey, func
+from sqlalchemy.orm import relationship, Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from app.db.database import Base
 import uuid
 import secrets
 import hashlib
 from datetime import datetime, timedelta
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .user import User
 
 class APIKey(Base):
     __tablename__ = "api_keys"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    # id, created_at, updated_at are inherited from Base
+
+    user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
     
     # Key information
-    name = Column(String(100), nullable=False)  # User-defined name for the key
-    key_hash = Column(String(64), nullable=False, unique=True, index=True)  # SHA-256 hash
-    key_prefix = Column(String(10), nullable=False)  # First 8 chars for identification
+    name: Mapped[str] = mapped_column(String(100), nullable=False)  # User-defined name for the key
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)  # SHA-256 hash
+    key_prefix: Mapped[str] = mapped_column(String(10), nullable=False)  # First 8 chars for identification
     
     # Permissions and limits
-    is_active = Column(Boolean, default=True)
-    scopes = Column(String(500), default="read,write")  # Comma-separated permissions
-    rate_limit_per_minute = Column(Integer, default=60)
-    rate_limit_per_hour = Column(Integer, default=1000)
-    rate_limit_per_day = Column(Integer, default=10000)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    scopes: Mapped[str] = mapped_column(String(500), default="read,write")  # Comma-separated permissions
+    rate_limit_per_minute: Mapped[int] = mapped_column(Integer, default=60)
+    rate_limit_per_hour: Mapped[int] = mapped_column(Integer, default=1000)
+    rate_limit_per_day: Mapped[int] = mapped_column(Integer, default=10000)
     
     # Usage tracking
-    usage_count = Column(Integer, default=0)
-    last_used_at = Column(DateTime(timezone=True), nullable=True)
-    last_used_ip = Column(String(45), nullable=True)  # IPv6 compatible
+    usage_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)  # IPv6 compatible
     
     # Security
-    expires_at = Column(DateTime(timezone=True), nullable=True)
-    created_from_ip = Column(String(45), nullable=True)
-    
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_from_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+
     # Relationships
-    user = relationship("User", back_populates="api_keys")
+    user: Mapped["User"] = relationship("User", back_populates="api_keys")
 
     def __repr__(self):
         return f"<APIKey(id={self.id}, name={self.name}, active={self.is_active})>"

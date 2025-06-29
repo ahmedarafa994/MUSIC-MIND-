@@ -1,66 +1,71 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from sqlalchemy import Integer, String, DateTime, Boolean, Text, func
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from app.db.database import Base
 import uuid
-from sqlalchemy.dialects.postgresql import UUID
-from passlib.context import CryptContext
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+# Removed passlib.context import, will use utils
 from datetime import datetime, timedelta
+from typing import List, TYPE_CHECKING, Optional # Added Optional
+from app.core.password_utils import verify_password, get_password_hash # Import new utils
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+if TYPE_CHECKING:
+    from .audio_file import AudioFile
+    from .agent_session import AgentSession
+    from .api_key import APIKey
+
+# pwd_context removed
 
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    email = Column(String(255), unique=True, index=True, nullable=False)
-    username = Column(String(100), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(255), nullable=False)
-    full_name = Column(String(255), nullable=True)
-    is_active = Column(Boolean, default=True)
-    is_superuser = Column(Boolean, default=False)
-    is_verified = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    last_login = Column(DateTime(timezone=True), nullable=True)
+    # id, created_at, updated_at are inherited from Base
+
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    username: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_login: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     # Profile fields
-    bio = Column(Text, nullable=True)
-    avatar_url = Column(String(500), nullable=True)
-    phone_number = Column(String(20), nullable=True)
-    country = Column(String(100), nullable=True)
-    timezone = Column(String(50), default="UTC")
+    bio: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    phone_number: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    timezone: Mapped[str] = mapped_column(String(50), default="UTC")
     
     # Subscription and billing
-    subscription_tier = Column(String(50), default="free")  # free, premium, pro
-    subscription_start_date = Column(DateTime(timezone=True), nullable=True)
-    subscription_end_date = Column(DateTime(timezone=True), nullable=True)
-    stripe_customer_id = Column(String(100), nullable=True)
+    subscription_tier: Mapped[str] = mapped_column(String(50), default="free")  # free, premium, pro
+    subscription_start_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    subscription_end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     
     # API usage tracking
-    api_usage_count = Column(Integer, default=0)
-    api_usage_limit = Column(Integer, default=100)  # Based on subscription
-    api_usage_reset_date = Column(DateTime(timezone=True), nullable=True)
+    api_usage_count: Mapped[int] = mapped_column(Integer, default=0)
+    api_usage_limit: Mapped[int] = mapped_column(Integer, default=100)  # Based on subscription
+    api_usage_reset_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     # Security
-    failed_login_attempts = Column(Integer, default=0)
-    locked_until = Column(DateTime(timezone=True), nullable=True)
-    password_reset_token = Column(String(255), nullable=True)
-    password_reset_expires = Column(DateTime(timezone=True), nullable=True)
-    email_verification_token = Column(String(255), nullable=True)
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    password_reset_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    password_reset_expires: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    email_verification_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
     # Relationships
-    audio_files = relationship("AudioFile", back_populates="user", cascade="all, delete-orphan")
-    agent_sessions = relationship("AgentSession", back_populates="user", cascade="all, delete-orphan")
-    api_keys = relationship("APIKey", back_populates="user", cascade="all, delete-orphan")
+    audio_files: Mapped[List["AudioFile"]] = relationship("AudioFile", back_populates="user", cascade="all, delete-orphan")
+    agent_sessions: Mapped[List["AgentSession"]] = relationship("AgentSession", back_populates="user", cascade="all, delete-orphan")
+    api_keys: Mapped[List["APIKey"]] = relationship("APIKey", back_populates="user", cascade="all, delete-orphan")
 
     def verify_password(self, password: str) -> bool:
         """Verify a password against the hash"""
-        return pwd_context.verify(password, self.hashed_password)
+        return verify_password(password, self.hashed_password) # Use imported function
 
     def set_password(self, password: str):
         """Set password hash"""
-        self.hashed_password = pwd_context.hash(password)
+        self.hashed_password = get_password_hash(password) # Use imported function
 
     def can_make_api_call(self) -> bool:
         """Check if user can make API calls based on usage limits"""

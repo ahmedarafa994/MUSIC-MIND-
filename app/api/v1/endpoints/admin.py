@@ -2,10 +2,10 @@ from typing import List, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.db.database import get_async_db # Changed to get_async_db
 from app.api.deps import get_current_active_superuser
 from app.models.user import User
-from app.crud.user import user as user_crud # Assuming user_crud is 'user'
+from app.crud.user import user_crud # Assuming user_crud is 'user'
 from app.crud.audio_file import audio_file as audio_file_crud
 from app.crud.agent_session import agent_session as agent_session_crud
 from app.crud.api_key import api_key as api_key_crud
@@ -22,7 +22,7 @@ router = APIRouter()
 
 @router.get("/users", response_model=List[UserResponse])
 async def admin_list_users(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_superuser),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
@@ -41,7 +41,7 @@ async def admin_list_users(
 @router.get("/users/{user_id}", response_model=UserResponse)
 async def admin_get_user(
     user_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_superuser)
 ):
     """
@@ -57,7 +57,7 @@ async def admin_get_user(
 async def admin_update_user(
     user_id: uuid.UUID,
     user_in: UserUpdate, # Or a more specific AdminUserUpdate schema
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_superuser)
 ):
     """
@@ -74,7 +74,7 @@ async def admin_update_user(
 @router.patch("/users/{user_id}/activate")
 async def admin_activate_user(
     user_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_superuser)
 ):
     """(Admin) Activate a user account."""
@@ -90,7 +90,7 @@ async def admin_activate_user(
 @router.patch("/users/{user_id}/deactivate")
 async def admin_deactivate_user(
     user_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_superuser)
 ):
     """(Admin) Deactivate a user account."""
@@ -106,7 +106,7 @@ async def admin_deactivate_user(
 
 @router.get("/system-stats", response_model=SystemStats) # Placeholder, SystemStats schema needed
 async def admin_get_system_stats(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_superuser)
 ):
     """
@@ -132,7 +132,7 @@ async def admin_get_system_stats(
 # Example: Endpoint to view all audio files (admin)
 @router.get("/audio-files", response_model=List[AudioFileResponse])
 async def admin_list_all_audio_files(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_superuser),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500)
@@ -145,7 +145,7 @@ async def admin_list_all_audio_files(
 # Example: Endpoint to view all agent sessions (admin)
 @router.get("/agent-sessions", response_model=List[AgentSessionResponse])
 async def admin_list_all_agent_sessions(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_superuser),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500)
@@ -158,7 +158,7 @@ async def admin_list_all_agent_sessions(
 # Example: Endpoint to view all API Keys (admin)
 @router.get("/api-keys", response_model=List[APIKeyResponse])
 async def admin_list_all_api_keys(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_active_superuser),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500)

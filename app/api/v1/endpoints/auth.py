@@ -1,20 +1,20 @@
 from datetime import timedelta
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
+from fastapi.security import OAuth2PasswordRequestForm # Keep for form dependency if used directly
+from sqlalchemy.ext.asyncio import AsyncSession # Changed import
 
-from app.core.database import get_db
-from app.core.security import (
+from app.db.database import get_async_db # Changed import
+from app.core.security import ( # Keep token generation and direct verification utils
     create_access_token,
     create_refresh_token,
-    verify_token,
-    get_current_user,
+    # verify_token, # This might be _verify_token_payload or specific token type verifiers
     generate_password_reset_token,
     verify_password_reset_token,
     generate_email_verification_token,
     verify_email_verification_token,
 )
+from app.api.deps import get_current_user # Import from deps
 from app.crud.user import user_crud
 from app.schemas.auth import (
     Token,
@@ -42,18 +42,18 @@ router = APIRouter()
 async def register(
     user_data: RegisterRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Register a new user"""
     # Check if user already exists
-    existing_user = user_crud.get_by_email(db, email=user_data.email)
+    existing_user = await user_crud.get_by_email(db, email=user_data.email)
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
     
-    existing_username = user_crud.get_by_username(db, username=user_data.username)
+    existing_username = await user_crud.get_by_username(db, username=user_data.username)
     if existing_username:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -61,18 +61,23 @@ async def register(
         )
     
     # Create new user
+    # Assuming UserCreate doesn't need bio, phone_number, country for initial creation
     user_create = UserCreate(
         email=user_data.email,
         username=user_data.username,
         password=user_data.password,
-        full_name=user_data.full_name
+        full_name=user_data.full_name,
+        bio=None, # Explicitly set to None if not in RegisterRequest
+        phone_number=None,
+        country=None
     )
     
-    user = user_crud.create(db, obj_in=user_create)
+    user = await user_crud.create(db, obj_in=user_create)
     
     # Generate email verification token
     verification_token = generate_email_verification_token(user.email)
-    user_crud.set_email_verification_token(db, user=user, token=verification_token)
+    # Assuming set_email_verification_token is async or will be refactored
+    await user_crud.set_email_verification_token(db, user=user, token=verification_token)
     
     # TODO: Send verification email
     
@@ -87,18 +92,18 @@ async def register(
 async def login(
     login_data: LoginRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Login user and return access token"""
-    user = user_crud.authenticate(
+    user = await user_crud.authenticate( # await
         db, email=login_data.email, password=login_data.password
     )
     
     if not user:
         # Record failed login attempt if user exists
-        existing_user = user_crud.get_by_email(db, email=login_data.email)
+        existing_user = await user_crud.get_by_email(db, email=login_data.email) # await
         if existing_user:
-            user_crud.record_failed_login(db, user=existing_user)
+            await user_crud.record_failed_login(db, user=existing_user) # await
         
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -112,14 +117,14 @@ async def login(
             detail="Inactive user"
         )
     
-    if user.is_account_locked():
+    if user.is_account_locked(): # This is a model method, likely synchronous
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
             detail="Account is temporarily locked due to failed login attempts"
         )
     
     # Reset failed login attempts on successful login
-    user_crud.reset_failed_login_attempts(db, user=user)
+    await user_crud.reset_failed_login_attempts(db, user=user) # await
     
     # Create tokens
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -129,7 +134,7 @@ async def login(
     refresh_token = create_refresh_token(subject=str(user.id))
     
     # Update last login
-    user_crud.update_last_login(db, user=user, ip_address=request.client.host)
+    await user_crud.update_last_login(db, user_id=user.id, ip_address=request.client.host) # await, pass user_id
     
     logger.info("User logged in", 
                 user_id=str(user.id), 
@@ -155,19 +160,24 @@ async def login(
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
     refresh_data: RefreshTokenRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Refresh access token using refresh token"""
     try:
-        payload = verify_token(refresh_data.refresh_token)
-        if payload.get("type") != "refresh":
+        # Use _verify_token_payload from app.core.security
+        # It raises HTTPException on failure, so we can catch that.
+        token_payload = _verify_token_payload(refresh_data.refresh_token)
+        if token_payload.type != "refresh":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token type"
             )
         
-        user_id = payload.get("sub")
-        user = user_crud.get(db, id=user_id)
+        user_id = token_payload.sub
+        if not user_id: # sub should not be None for a valid refresh token
+             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+
+        user = await user_crud.get(db, id=user_id) # await
         if not user or not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -205,17 +215,17 @@ async def logout(
 @router.post("/password-reset")
 async def request_password_reset(
     reset_data: PasswordResetRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Request password reset"""
-    user = user_crud.get_by_email(db, email=reset_data.email)
+    user = await user_crud.get_by_email(db, email=reset_data.email) # await
     if not user:
         # Don't reveal if email exists or not
         return {"message": "If the email exists, a password reset link has been sent"}
     
     # Generate password reset token
     reset_token = generate_password_reset_token(user.email)
-    user_crud.set_password_reset_token(db, user=user, token=reset_token)
+    await user_crud.set_password_reset_token(db, user=user, token=reset_token) # await
     
     # TODO: Send password reset email
     
@@ -226,17 +236,17 @@ async def request_password_reset(
 @router.post("/password-reset/confirm")
 async def confirm_password_reset(
     reset_data: PasswordResetConfirm,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Confirm password reset with token"""
-    email = verify_password_reset_token(reset_data.token)
+    email = verify_password_reset_token(reset_data.token) # This is a sync function from core.security
     if not email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired password reset token"
         )
     
-    user = user_crud.get_by_email(db, email=email)
+    user = await user_crud.get_by_email(db, email=email) # await
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -244,8 +254,8 @@ async def confirm_password_reset(
         )
     
     # Update password
-    user_crud.update_password(db, user=user, new_password=reset_data.new_password)
-    user_crud.clear_password_reset_token(db, user=user)
+    await user_crud.update_password(db, user=user, new_password=reset_data.new_password) # await
+    await user_crud.clear_password_reset_token(db, user=user) # await
     
     logger.info("Password reset completed", user_id=str(user.id))
     
@@ -255,16 +265,17 @@ async def confirm_password_reset(
 async def change_password(
     password_data: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Change user password"""
+    # current_user.verify_password is a model method, likely sync, which is fine.
     if not current_user.verify_password(password_data.current_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect current password"
         )
     
-    user_crud.update_password(db, user=current_user, new_password=password_data.new_password)
+    await user_crud.update_password(db, user=current_user, new_password=password_data.new_password) # await
     
     logger.info("Password changed", user_id=str(current_user.id))
     
@@ -273,19 +284,19 @@ async def change_password(
 @router.post("/verify-email")
 async def request_email_verification(
     verification_data: EmailVerificationRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Request email verification"""
-    user = user_crud.get_by_email(db, email=verification_data.email)
+    user = await user_crud.get_by_email(db, email=verification_data.email) # await
     if not user:
         return {"message": "If the email exists, a verification link has been sent"}
     
-    if user.is_verified:
+    if user.is_verified: # model property, sync is fine
         return {"message": "Email is already verified"}
     
     # Generate verification token
-    verification_token = generate_email_verification_token(user.email)
-    user_crud.set_email_verification_token(db, user=user, token=verification_token)
+    verification_token = generate_email_verification_token(user.email) # sync util
+    await user_crud.set_email_verification_token(db, user=user, token=verification_token) # await
     
     # TODO: Send verification email
     
@@ -296,29 +307,29 @@ async def request_email_verification(
 @router.post("/verify-email/confirm")
 async def confirm_email_verification(
     verification_data: EmailVerificationConfirm,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Confirm email verification with token"""
-    email = verify_email_verification_token(verification_data.token)
+    email = verify_email_verification_token(verification_data.token) # sync util
     if not email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification token"
         )
     
-    user = user_crud.get_by_email(db, email=email)
+    user = await user_crud.get_by_email(db, email=email) # await
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
     
-    if user.is_verified:
+    if user.is_verified: # model property, sync is fine
         return {"message": "Email is already verified"}
     
     # Verify user
-    user_crud.verify_user(db, user=user)
-    user_crud.clear_email_verification_token(db, user=user)
+    await user_crud.verify_user(db, user=user) # await
+    await user_crud.clear_email_verification_token(db, user=user) # await
     
     logger.info("Email verified", user_id=str(user.id))
     

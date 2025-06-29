@@ -1,8 +1,8 @@
 from typing import Any, Dict, Generic, List, Optional, Type, TypeVar, Union
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func, desc, asc
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update as sqlalchemy_update, delete as sqlalchemy_delete, func, desc, asc, or_, and_
 from datetime import datetime, timedelta
 from app.db.database import Base
 
@@ -20,48 +20,52 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         """
         self.model = model
 
-    def get(self, db: Session, id: Any) -> Optional[ModelType]:
+    async def get(self, db: AsyncSession, id: Any) -> Optional[ModelType]:
         """Get a single record by ID"""
-        return db.query(self.model).filter(self.model.id == id).first()
+        statement = select(self.model).filter(self.model.id == id)
+        result = await db.execute(statement)
+        return result.scalar_one_or_none()
 
-    def get_multi(
+    async def get_multi(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         skip: int = 0,
         limit: int = 100,
-        sort_by: str = None,
+        sort_by: Optional[str] = None,
         sort_order: str = "desc"
     ) -> List[ModelType]:
         """Get multiple records with pagination and sorting"""
-        query = db.query(self.model)
+        statement = select(self.model)
         
         # Apply sorting if specified
         if sort_by and hasattr(self.model, sort_by):
             sort_column = getattr(self.model, sort_by)
             if sort_order.lower() == "asc":
-                query = query.order_by(asc(sort_column))
+                statement = statement.order_by(asc(sort_column))
             else:
-                query = query.order_by(desc(sort_column))
+                statement = statement.order_by(desc(sort_column))
         else:
             # Default sort by created_at if available
             if hasattr(self.model, 'created_at'):
-                query = query.order_by(desc(self.model.created_at))
+                statement = statement.order_by(desc(self.model.created_at))
         
-        return query.offset(skip).limit(limit).all()
+        statement = statement.offset(skip).limit(limit)
+        result = await db.execute(statement)
+        return result.scalars().all()
 
-    def create(self, db: Session, *, obj_in: CreateSchemaType) -> ModelType:
+    async def create(self, db: AsyncSession, *, obj_in: CreateSchemaType) -> ModelType:
         """Create a new record"""
         obj_in_data = jsonable_encoder(obj_in)
         db_obj = self.model(**obj_in_data)
         db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+        await db.commit()
+        await db.refresh(db_obj)
         return db_obj
 
-    def update(
+    async def update(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         db_obj: ModelType,
         obj_in: Union[UpdateSchemaType, Dict[str, Any]]
@@ -71,7 +75,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         if isinstance(obj_in, dict):
             update_data = obj_in
         else:
-            update_data = obj_in.dict(exclude_unset=True)
+            update_data = obj_in.model_dump(exclude_unset=True) # Pydantic v2 uses model_dump
         
         for field in obj_data:
             if field in update_data:
@@ -79,67 +83,80 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         
         # Update timestamp if available
         if hasattr(db_obj, 'updated_at'):
-            db_obj.updated_at = datetime.utcnow()
+            setattr(db_obj, 'updated_at', datetime.utcnow()) # Use setattr for consistency
         
         db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+        await db.commit()
+        await db.refresh(db_obj)
         return db_obj
 
-    def remove(self, db: Session, *, id: Any) -> ModelType:
+    async def remove(self, db: AsyncSession, *, id: Any) -> Optional[ModelType]:
         """Delete a record by ID"""
-        obj = db.query(self.model).get(id)
+        obj = await self.get(db, id) # Use async get
         if obj:
-            db.delete(obj)
-            db.commit()
+            await db.delete(obj)
+            await db.commit()
         return obj
 
-    def soft_delete(self, db: Session, *, id: Any) -> Optional[ModelType]:
+    async def soft_delete(self, db: AsyncSession, *, id: Any) -> Optional[ModelType]:
         """Soft delete a record (if model supports it)"""
-        obj = db.query(self.model).get(id)
+        obj = await self.get(db, id) # Use async get
         if obj and hasattr(obj, 'is_deleted'):
-            obj.is_deleted = True
+            setattr(obj, 'is_deleted', True)
             if hasattr(obj, 'updated_at'):
-                obj.updated_at = datetime.utcnow()
+                setattr(obj, 'updated_at', datetime.utcnow())
             db.add(obj)
-            db.commit()
-            db.refresh(obj)
+            await db.commit()
+            await db.refresh(obj)
         return obj
 
-    def restore(self, db: Session, *, id: Any) -> Optional[ModelType]:
+    async def restore(self, db: AsyncSession, *, id: Any) -> Optional[ModelType]:
         """Restore a soft-deleted record"""
-        obj = db.query(self.model).get(id)
+        # This might need a specific filter if soft-deleted items are usually excluded by default
+        statement = select(self.model).filter(self.model.id == id)
+        result = await db.execute(statement)
+        obj = result.scalar_one_or_none()
+
         if obj and hasattr(obj, 'is_deleted'):
-            obj.is_deleted = False
+            setattr(obj, 'is_deleted', False)
             if hasattr(obj, 'updated_at'):
-                obj.updated_at = datetime.utcnow()
+                setattr(obj, 'updated_at', datetime.utcnow())
             db.add(obj)
-            db.commit()
-            db.refresh(obj)
+            await db.commit()
+            await db.refresh(obj)
         return obj
 
-    def count(self, db: Session, *, filters: Dict[str, Any] = None) -> int:
+    async def count(self, db: AsyncSession, *, filters: Optional[Dict[str, Any]] = None) -> int:
         """Count total records with optional filters"""
-        query = db.query(self.model)
+        statement = select(func.count()).select_from(self.model)
         if filters:
+            filter_conditions = []
             for field, value in filters.items():
                 if hasattr(self.model, field) and value is not None:
-                    query = query.filter(getattr(self.model, field) == value)
-        return query.count()
+                    filter_conditions.append(getattr(self.model, field) == value)
+            if filter_conditions:
+                statement = statement.filter(and_(*filter_conditions))
 
-    def exists(self, db: Session, *, id: Any) -> bool:
+        result = await db.execute(statement)
+        return result.scalar_one()
+
+    async def exists(self, db: AsyncSession, *, id: Any) -> bool:
         """Check if record exists by ID"""
-        return db.query(self.model).filter(self.model.id == id).first() is not None
+        statement = select(self.model.id).filter(self.model.id == id)
+        result = await db.execute(statement)
+        return result.scalar_one_or_none() is not None
 
-    def get_by_field(self, db: Session, *, field: str, value: Any) -> Optional[ModelType]:
+    async def get_by_field(self, db: AsyncSession, *, field: str, value: Any) -> Optional[ModelType]:
         """Get record by any field"""
         if hasattr(self.model, field):
-            return db.query(self.model).filter(getattr(self.model, field) == value).first()
+            statement = select(self.model).filter(getattr(self.model, field) == value)
+            result = await db.execute(statement)
+            return result.scalar_one_or_none()
         return None
 
-    def get_multi_by_field(
+    async def get_multi_by_field(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         field: str,
         value: Any,
@@ -148,12 +165,14 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     ) -> List[ModelType]:
         """Get multiple records by field value"""
         if hasattr(self.model, field):
-            return db.query(self.model).filter(
+            statement = select(self.model).filter(
                 getattr(self.model, field) == value
-            ).offset(skip).limit(limit).all()
+            ).offset(skip).limit(limit)
+            result = await db.execute(statement)
+            return result.scalars().all()
         return []
 
-    def bulk_create(self, db: Session, *, objs_in: List[CreateSchemaType]) -> List[ModelType]:
+    async def bulk_create(self, db: AsyncSession, *, objs_in: List[CreateSchemaType]) -> List[ModelType]:
         """Create multiple records"""
         db_objs = []
         for obj_in in objs_in:
@@ -162,14 +181,17 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             db_objs.append(db_obj)
         
         db.add_all(db_objs)
-        db.commit()
+        await db.commit()
+        # Refreshing multiple objects might need individual refresh calls or a different strategy
+        # For now, let's assume individual refresh if needed, or skip if IDs are set by DB.
+        # If primary keys are auto-incrementing and set by the DB, refresh is needed to get them.
         for db_obj in db_objs:
-            db.refresh(db_obj)
+            await db.refresh(db_obj)
         return db_objs
 
-    def bulk_update(
+    async def bulk_update(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         ids: List[Any],
         update_data: Dict[str, Any]
@@ -178,23 +200,30 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         if hasattr(self.model, 'updated_at'):
             update_data['updated_at'] = datetime.utcnow()
         
-        updated_count = db.query(self.model).filter(
-            self.model.id.in_(ids)
-        ).update(update_data, synchronize_session=False)
-        db.commit()
-        return updated_count
+        statement = (
+            sqlalchemy_update(self.model)
+            .where(self.model.id.in_(ids))
+            .values(**update_data)
+            .execution_options(synchronize_session=False)
+        )
+        result = await db.execute(statement)
+        await db.commit()
+        return result.rowcount
 
-    def bulk_delete(self, db: Session, *, ids: List[Any]) -> int:
+    async def bulk_delete(self, db: AsyncSession, *, ids: List[Any]) -> int:
         """Bulk delete multiple records"""
-        deleted_count = db.query(self.model).filter(
-            self.model.id.in_(ids)
-        ).delete(synchronize_session=False)
-        db.commit()
-        return deleted_count
+        statement = (
+            sqlalchemy_delete(self.model)
+            .where(self.model.id.in_(ids))
+            .execution_options(synchronize_session=False)
+        )
+        result = await db.execute(statement)
+        await db.commit()
+        return result.rowcount
 
-    def search(
+    async def search(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         query: str,
         fields: List[str],
@@ -206,17 +235,21 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         for field in fields:
             if hasattr(self.model, field):
                 field_attr = getattr(self.model, field)
-                search_conditions.append(field_attr.ilike(f"%{query}%"))
+                # Ensure the column type supports ilike (e.g., String types)
+                if hasattr(field_attr, 'ilike'):
+                    search_conditions.append(field_attr.ilike(f"%{query}%"))
         
         if search_conditions:
-            return db.query(self.model).filter(
+            statement = select(self.model).filter(
                 or_(*search_conditions)
-            ).offset(skip).limit(limit).all()
+            ).offset(skip).limit(limit)
+            result = await db.execute(statement)
+            return result.scalars().all()
         return []
 
-    def filter_by_date_range(
+    async def filter_by_date_range(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         date_field: str,
         start_date: datetime,
@@ -227,14 +260,16 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         """Filter records by date range"""
         if hasattr(self.model, date_field):
             date_attr = getattr(self.model, date_field)
-            return db.query(self.model).filter(
+            statement = select(self.model).filter(
                 and_(date_attr >= start_date, date_attr <= end_date)
-            ).offset(skip).limit(limit).all()
+            ).offset(skip).limit(limit)
+            result = await db.execute(statement)
+            return result.scalars().all()
         return []
 
-    def get_recent(
+    async def get_recent(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         days: int = 7,
         limit: int = 100
@@ -242,45 +277,62 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         """Get recent records from the last N days"""
         if hasattr(self.model, 'created_at'):
             cutoff_date = datetime.utcnow() - timedelta(days=days)
-            return db.query(self.model).filter(
+            statement = select(self.model).filter(
                 self.model.created_at >= cutoff_date
-            ).order_by(desc(self.model.created_at)).limit(limit).all()
+            ).order_by(desc(self.model.created_at)).limit(limit)
+            result = await db.execute(statement)
+            return result.scalars().all()
         return []
 
-    def get_paginated(
+    async def get_paginated(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         page: int = 1,
         size: int = 20,
-        sort_by: str = None,
+        sort_by: Optional[str] = None,
         sort_order: str = "desc",
-        filters: Dict[str, Any] = None
+        filters: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Get paginated results with metadata"""
-        query = db.query(self.model)
         
-        # Apply filters
+        # Count query
+        count_statement = select(func.count()).select_from(self.model)
         if filters:
+            filter_conditions_count = []
             for field, value in filters.items():
                 if hasattr(self.model, field) and value is not None:
-                    query = query.filter(getattr(self.model, field) == value)
+                    filter_conditions_count.append(getattr(self.model, field) == value)
+            if filter_conditions_count:
+                 count_statement = count_statement.filter(and_(*filter_conditions_count))
         
-        # Apply sorting
+        total_result = await db.execute(count_statement)
+        total = total_result.scalar_one()
+
+        # Data query
+        data_statement = select(self.model)
+        if filters:
+            filter_conditions_data = []
+            for field, value in filters.items():
+                if hasattr(self.model, field) and value is not None:
+                     filter_conditions_data.append(getattr(self.model, field) == value)
+            if filter_conditions_data:
+                data_statement = data_statement.filter(and_(*filter_conditions_data))
+
         if sort_by and hasattr(self.model, sort_by):
             sort_column = getattr(self.model, sort_by)
             if sort_order.lower() == "asc":
-                query = query.order_by(asc(sort_column))
+                data_statement = data_statement.order_by(asc(sort_column))
             else:
-                query = query.order_by(desc(sort_column))
+                data_statement = data_statement.order_by(desc(sort_column))
         
-        # Get total count
-        total = query.count()
-        
-        # Calculate pagination
         skip = (page - 1) * size
-        items = query.offset(skip).limit(size).all()
-        pages = (total + size - 1) // size  # Ceiling division
+        data_statement = data_statement.offset(skip).limit(size)
+
+        items_result = await db.execute(data_statement)
+        items = items_result.scalars().all()
+
+        pages = (total + size - 1) // size if size > 0 else 0
         
         return {
             "items": items,

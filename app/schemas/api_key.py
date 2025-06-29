@@ -113,7 +113,7 @@ class APIKeySecurityEvent(BaseSchema):
     ip_address: str
     user_agent: Optional[str]
     timestamp: datetime
-    severity: str = Field(..., pattern="^(low|medium|high|critical)$")
+    severity: str = Field(..., pattern="^(low|medium|high|critical)$") # Already correct
     metadata: Optional[dict] = None
 
 class APIKeySecurityLog(BaseSchema):
@@ -137,8 +137,8 @@ class APIKeyRotationResponse(BaseSchema):
 
 # Bulk API key operations
 class BulkAPIKeyOperation(BaseSchema):
-    api_key_ids: List[uuid.UUID] = Field(..., min_items=1, max_items=50)
-    operation: str = Field(..., pattern="^(activate|deactivate|delete|extend_expiry)$")
+    api_key_ids: List[uuid.UUID] = Field(..., min_length=1, max_length=50) # Changed min_items/max_items to min_length/max_length
+    operation: str = Field(..., pattern="^(activate|deactivate|delete|extend_expiry)$") # Already correct
     parameters: Optional[dict] = None
 
 class BulkAPIKeyOperationResult(BaseSchema):
@@ -180,7 +180,7 @@ class APIKeyAnalytics(BaseSchema):
 class APIKeyWebhook(BaseSchema):
     api_key_id: uuid.UUID
     webhook_url: str = Field(..., max_length=500)
-    events: List[str] = Field(..., min_items=1)  # rate_limit, security_event, expiry_warning
+    events: List[str] = Field(..., min_length=1)  # rate_limit, security_event, expiry_warning
     is_active: bool = True
     secret: Optional[str] = Field(None, max_length=100)
 
