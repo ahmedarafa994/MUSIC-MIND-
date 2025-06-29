@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer
 from contextlib import asynccontextmanager
 import time
-import logging
+import structlog # Use structlog
 import os
 from typing import Dict, Any
 
@@ -14,131 +14,117 @@ from typing import Dict, Any
 from app.api.v1.api import api_router
 from app.api.v1.health import router as health_router
 from app.core.config import settings
-from app.db.database import create_tables
+from app.core.database import init_db, engine as async_engine
 from app.core.logging import setup_logging
 from app.core.exceptions import (
-    CustomHTTPException,
     validation_exception_handler,
     http_exception_handler,
     general_exception_handler
 )
+# Assuming MonitoringMiddleware and MetricsMiddleware are correctly defined elsewhere
 from app.middleware.monitoring import MonitoringMiddleware, MetricsMiddleware
 
-# Setup logging
+# Setup logging FIRST
 setup_logging()
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__) # Use structlog
 
-# Security
-security = HTTPBearer(auto_error=False)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
-    # Startup
-    logger.info("Starting AI Music Mastering API...")
+    logger.info("Starting AI Music Mastering API...", project_name=settings.PROJECT_NAME, environment=settings.ENVIRONMENT)
     
-    # Initialize database
     try:
-        create_tables()
-        logger.info("Database tables initialized successfully")
+        await init_db()
+        logger.info("Database tables initialized successfully.")
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
-        raise
+        logger.error("Failed to initialize database during startup.", error=str(e), exc_info=True)
     
-    # Create upload directories
-    os.makedirs(settings.UPLOAD_PATH, exist_ok=True)
-    os.makedirs(settings.TEMP_PATH, exist_ok=True)
-    logger.info("Upload directories created")
+    if settings.STORAGE_PROVIDER == "local" and hasattr(settings, 'LOCAL_STORAGE_PATH'):
+        os.makedirs(settings.LOCAL_STORAGE_PATH, exist_ok=True)
+        logger.info(f"Local storage path ensured: {settings.LOCAL_STORAGE_PATH}")
     
-    # Initialize AI model clients
-    try:
-        from app.services.api_integration_manager import APIIntegrationManager
-        api_manager = APIIntegrationManager()
-        await api_manager.initialize_clients()
-        logger.info("AI model clients initialized")
-    except Exception as e:
-        logger.warning(f"Some AI model clients failed to initialize: {e}")
+    if hasattr(settings, 'TEMP_PATH'):
+        os.makedirs(settings.TEMP_PATH, exist_ok=True)
+        logger.info(f"Temp path ensured: {settings.TEMP_PATH}")
     
     yield
     
-    # Shutdown
     logger.info("Shutting down AI Music Mastering API...")
     
-    # Close Redis connections
-    try:
-        from app.core.redis_client import redis_client
-        await redis_client.close()
-        logger.info("Redis connections closed")
-    except Exception as e:
-        logger.error(f"Error closing Redis connections: {e}")
+    if async_engine:
+        await async_engine.dispose()
+        logger.info("Database engine connections closed.")
 
-# Create FastAPI application
+    logger.info("Application shutdown complete.")
+
+
 app = FastAPI(
-    title=settings.APP_NAME,
-    description="AI-powered music generation and mastering platform",
-    version="1.0.0",
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    docs_url=f"{settings.API_V1_STR}/docs",
-    redoc_url=f"{settings.API_V1_STR}/redoc",
+    title=settings.PROJECT_NAME,
+    description="AI-powered music generation and mastering platform.",
+    version=getattr(settings, 'APP_VERSION', '1.0.0'),
+    openapi_url=f"{settings.API_V1_STR}/openapi.json" if settings.DEBUG else None,
+    docs_url="/docs" if settings.DEBUG else None,
+    redoc_url="/redoc" if settings.DEBUG else None,
     lifespan=lifespan
 )
 
-# Add monitoring middleware
-metrics_middleware = MetricsMiddleware(app)
 app.add_middleware(MonitoringMiddleware)
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.ALLOWED_HOSTS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+if settings.ALLOWED_HOSTS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[str(origin).strip() for origin in settings.ALLOWED_HOSTS],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-# Trusted host middleware
-if settings.ENVIRONMENT == "production":
+if settings.ENVIRONMENT == "production" and settings.ALLOWED_HOSTS != ["*"]:
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=settings.ALLOWED_HOSTS
     )
 
-# Exception handlers
-app.add_exception_handler(CustomHTTPException, http_exception_handler)
-app.add_exception_handler(HTTPException, http_exception_handler)
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, general_exception_handler)
 
-# Mount static files
-if os.path.exists("static"):
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+# if os.path.exists("static") and settings.DEBUG:
+#     app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Include routers
-app.include_router(health_router, tags=["health"])
+app.include_router(health_router, tags=["Health"])
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-# Metrics endpoint
-@app.get("/metrics")
-async def get_metrics():
-    """Get application metrics"""
-    return metrics_middleware.get_metrics()
+if hasattr(MetricsMiddleware, "get_metrics"):
+    metrics_middleware_instance = MetricsMiddleware(app)
+    @app.get("/metrics", tags=["Monitoring"])
+    async def get_metrics_endpoint():
+        """Get application metrics (placeholder)."""
+        return metrics_middleware_instance.get_metrics()
 
-# Root endpoint
-@app.get("/")
+@app.get("/", tags=["Root"])
 async def root():
-    """Root endpoint"""
+    """Root endpoint providing basic API information."""
     return {
-        "message": "AI Music Mastering API",
-        "version": "1.0.0",
-        "docs": f"{settings.API_V1_STR}/docs",
-        "health": "/health"
+        "project_name": settings.PROJECT_NAME,
+        "version": getattr(settings, 'APP_VERSION', '1.0.0'),
+        "environment": settings.ENVIRONMENT,
+        "documentation_url": app.docs_url if settings.DEBUG else "disabled_in_production",
+        "health_check_url": "/health"
     }
 
 if __name__ == "__main__":
     import uvicorn
+    logger.info("Starting Uvicorn server directly for development...")
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
-        port=8000,
+        host=settings.HOST,
+        port=settings.PORT,
         reload=settings.DEBUG,
-        log_level="info"
+        log_config=None,
+        use_colors=settings.DEBUG
     )

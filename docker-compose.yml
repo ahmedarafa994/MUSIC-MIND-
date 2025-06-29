@@ -1,210 +1,137 @@
 version: '3.8'
 
 services:
-  # Main API Gateway
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:password@db:5432/music_mastering
+      # Ensure these match your app.core.config.py expectations or are overridden by an .env file
+      - DATABASE_URL=postgresql+asyncpg://musicapp:musicapp123@db:5432/musicapp
       - REDIS_URL=redis://redis:6379/0
-      - DEBUG=true
+      - DEBUG=true # Set to false in production
+      - ENVIRONMENT=development # or "production"
+      - SECRET_KEY=a_very_secret_key_that_should_be_changed_in_production_or_via_env_file
+      - API_V1_STR=/api/v1
+      # AWS Credentials (better to use env_file or IAM roles in production)
+      - AWS_ACCESS_KEY_ID=your_aws_access_key_id
+      - AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key
+      - AWS_S3_BUCKET=your-ai-music-bucket
+      - AWS_REGION=us-east-1
+      # External API Keys (examples, provide actual values or use env_file)
+      - HUGGINGFACE_API_KEY=your_hf_key
+      - STABILITY_API_KEY=your_stability_key
+      - OPENAI_API_KEY=your_openai_key
+      - LOG_LEVEL=INFO
     volumes:
-      - ./uploads:/app/uploads
-      - ./temp:/app/temp
-      - ./logs:/app/logs
+      - ./app:/app/app # For development: sync code changes
+      - ./music_agent.py:/app/music_agent.py # If music_agent.py is at the root
+      # Map the temp path defined in config.py
+      # If settings.TEMP_PATH is /tmp/audio_processing, this maps a local ./temp_processing_data
+      # to that path inside the container. This is useful for inspecting temp files during dev.
+      # For production, this volume might not be needed if temp files are purely ephemeral.
+      - ./temp_processing_data:/tmp/audio_processing
+      # If using local storage for uploads (settings.STORAGE_PROVIDER == "local")
+      # - ./local_uploads_storage:/app/local_uploads_storage # Map to settings.LOCAL_STORAGE_PATH
     depends_on:
       - db
       - redis
-      - music-gen-service
-      - stable-audio-service
     restart: unless-stopped
+    # Add healthcheck for the api service itself based on the Dockerfile's HEALTHCHECK
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
 
-  # Database Services
   db:
-    image: postgres:15
+    image: postgres:15-alpine # Using alpine for a smaller image
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=music_mastering
+      - POSTGRES_USER=musicapp
+      - POSTGRES_PASSWORD=musicapp123
+      - POSTGRES_DB=musicapp
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5432:5432" # Expose DB port for local connections if needed
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U musicapp -d musicapp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "6379:6379" # Expose Redis port if needed externally
     volumes:
       - redis_data:/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
-  # AI Model Services
-  music-gen-service:
-    build:
-      context: ./services/music-gen
-      dockerfile: Dockerfile
-    environment:
-      - MODEL_NAME=music_gen
-      - GPU_ENABLED=true
-    volumes:
-      - model_cache:/app/models
-    restart: unless-stopped
-
-  stable-audio-service:
-    build:
-      context: ./services/stable-audio
-      dockerfile: Dockerfile
-    environment:
-      - MODEL_NAME=stable_audio
-      - GPU_ENABLED=true
-    volumes:
-      - model_cache:/app/models
-    restart: unless-stopped
-
-  music-lm-service:
-    build:
-      context: ./services/music-lm
-      dockerfile: Dockerfile
-    environment:
-      - MODEL_NAME=music_lm
-    volumes:
-      - model_cache:/app/models
-    restart: unless-stopped
-
-  audiocraft-service:
-    build:
-      context: ./services/audiocraft
-      dockerfile: Dockerfile
-    environment:
-      - MODEL_NAME=audiocraft
-      - GPU_ENABLED=true
-    volumes:
-      - model_cache:/app/models
-    restart: unless-stopped
-
-  jukebox-service:
-    build:
-      context: ./services/jukebox
-      dockerfile: Dockerfile
-    environment:
-      - MODEL_NAME=jukebox
-      - GPU_ENABLED=true
-    volumes:
-      - model_cache:/app/models
-    restart: unless-stopped
-
-  melody-rnn-service:
-    build:
-      context: ./services/melody-rnn
-      dockerfile: Dockerfile
-    environment:
-      - MODEL_NAME=melody_rnn
-    volumes:
-      - model_cache:/app/models
-    restart: unless-stopped
-
-  music-vae-service:
-    build:
-      context: ./services/music-vae
-      dockerfile: Dockerfile
-    environment:
-      - MODEL_NAME=music_vae
-    volumes:
-      - model_cache:/app/models
-    restart: unless-stopped
-
-  aces-service:
-    build:
-      context: ./services/aces
-      dockerfile: Dockerfile
-    environment:
-      - MODEL_NAME=aces
-      - GPU_ENABLED=true
-    volumes:
-      - model_cache:/app/models
-    restart: unless-stopped
-
-  rhythm-service:
-    build:
-      context: ./services/rhythm
-      dockerfile: Dockerfile
-    environment:
-      - MODEL_NAME=tepand_diff_rhythm
-    volumes:
-      - model_cache:/app/models
-    restart: unless-stopped
-
-  suni-service:
-    build:
-      context: ./services/suni
-      dockerfile: Dockerfile
-    environment:
-      - MODEL_NAME=suni
-    volumes:
-      - model_cache:/app/models
-    restart: unless-stopped
-
-  beethoven-service:
-    build:
-      context: ./services/beethoven
-      dockerfile: Dockerfile
-    environment:
-      - MODEL_NAME=beethoven_ai
-    volumes:
-      - model_cache:/app/models
-    restart: unless-stopped
-
-  mureka-service:
-    build:
-      context: ./services/mureka
-      dockerfile: Dockerfile
-    environment:
-      - MODEL_NAME=mureka
-    volumes:
-      - model_cache:/app/models
-    restart: unless-stopped
-
-  # Load Balancer
   nginx:
     image: nginx:alpine
     ports:
       - "80:80"
-      - "443:443"
+      # - "443:443" # Uncomment if you set up SSL
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./uploads:/usr/share/nginx/html/uploads
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro # Mount nginx config as read-only
+      # - ./ssl:/etc/nginx/ssl:ro # Uncomment for SSL certificates
+      # If Nginx is meant to serve static/uploaded files directly from a shared volume:
+      # - ./local_uploads_storage:/usr/share/nginx/html/uploads
     depends_on:
       - api
     restart: unless-stopped
 
-  # Monitoring
-  prometheus:
-    image: prom/prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-    restart: unless-stopped
+  # AI Model Services (Commented out as current Python code uses external APIs)
+  # If you intend to use these, the APIIntegrationManager/MusicAgentService needs to be
+  # updated to communicate with these internal services.
+  #
+  # music-gen-service:
+  #   build:
+  #     context: ./services/music-gen # Assuming these paths exist
+  #     dockerfile: Dockerfile
+  #   restart: unless-stopped
+  #
+  # stable-audio-service:
+  #   build:
+  #     context: ./services/stable-audio
+  #     dockerfile: Dockerfile
+  #   restart: unless-stopped
+  # ... (other AI services) ...
 
-  grafana:
-    image: grafana/grafana
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    volumes:
-      - grafana_data:/var/lib/grafana
-    restart: unless-stopped
+  # Monitoring (Commented out for simplicity, can be re-enabled)
+  # prometheus:
+  #   image: prom/prometheus
+  #   ports:
+  #     - "9090:9090"
+  #   volumes:
+  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml # Ensure this file exists
+  #   restart: unless-stopped
+  #
+  # grafana:
+  #   image: grafana/grafana
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=admin
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #   restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
-  model_cache:
-  grafana_data:
+  # model_cache: # Only if AI model services are used
+  # grafana_data: # Only if Grafana is used
 
 networks:
   default:

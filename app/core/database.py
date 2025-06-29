@@ -1,74 +1,86 @@
-from sqlalchemy import create_engine, MetaData
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import StaticPool
-from typing import Generator
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.orm import declarative_base
+from typing import AsyncGenerator
 import logging
 from app.core.config import settings
+import structlog
 
-logger = logging.getLogger(__name__)
+try:
+    logger = structlog.get_logger(__name__)
+except Exception:
+    logger = logging.getLogger(__name__)
+    if not logger.hasHandlers():
+        logging.basicConfig(level=settings.LOG_LEVEL.upper() if hasattr(settings, 'LOG_LEVEL') else logging.INFO)
 
-# Database engine configuration
 if settings.DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(
-        settings.DATABASE_URL,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-        echo=settings.DEBUG
+    connect_args = {}
+    if "sqlite+aiosqlite" not in str(settings.DATABASE_URL):
+        logger.warning("SQLite DATABASE_URL does not specify aiosqlite, async operations might not work as expected. Consider 'sqlite+aiosqlite:///./your_db.db'")
+
+    async_engine = create_async_engine(
+        str(settings.DATABASE_URL),
+        echo=settings.DB_ECHO_LOG if hasattr(settings, 'DB_ECHO_LOG') else settings.DEBUG, # Use DB_ECHO_LOG or fallback to DEBUG
+        future=True
     )
 else:
-    # PostgreSQL or other databases
-    engine = create_engine(
-        settings.DATABASE_URL,
+    async_engine = create_async_engine(
+        str(settings.DATABASE_URL),
         pool_size=20,
-        max_overflow=0,
+        max_overflow=10,
         pool_pre_ping=True,
-        echo=settings.DEBUG
+        echo=settings.DB_ECHO_LOG if hasattr(settings, 'DB_ECHO_LOG') else settings.DEBUG,
+        future=True
     )
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+AsyncSessionLocal = async_sessionmaker(
+    bind=async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False
+)
 
-# Create declarative base
 Base = declarative_base()
 
-def get_db() -> Generator[Session, None, None]:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
-    Database dependency for FastAPI endpoints
+    Async database dependency for FastAPI endpoints.
     """
-    db = SessionLocal()
-    try:
-        yield db
-    except Exception as e:
-        logger.error(f"Database session error: {e}")
-        db.rollback()
-        raise
-    finally:
-        db.close()
+    async with AsyncSessionLocal() as session:
+        try:
+            # await session.begin() # Removed begin here, individual CRUD methods can manage transactions
+            yield session
+            # await session.commit() # Removed commit here
+        except Exception as e:
+            logger.error(f"Database session error: {e}", exc_info=True)
+            await session.rollback()
+            raise
+        finally:
+            pass # Session closed by 'async with'
 
-def create_tables():
+async def init_db():
     """
-    Create all database tables
+    Initialize database and create tables.
     """
     try:
-        # Import all models to ensure they are registered
-        from app.models import user, audio_file, agent_session, api_key
-        
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables created successfully")
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables created/verified successfully using async engine.")
     except Exception as e:
-        logger.error(f"Error creating database tables: {e}")
+        logger.error(f"Error creating database tables with async engine: {e}", exc_info=True)
         raise
 
-def drop_tables():
+async def drop_tables_async():
     """
-    Drop all database tables (use with caution)
+    Drop all database tables (use with caution) using async engine.
     """
     try:
-        Base.metadata.drop_all(bind=engine)
-        logger.info("Database tables dropped successfully")
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        logger.info("Database tables dropped successfully using async engine.")
     except Exception as e:
-        logger.error(f"Error dropping database tables: {e}")
+        logger.error(f"Error dropping database tables with async engine: {e}", exc_info=True)
         raise
+
+engine = async_engine # Export async_engine as engine for main.py
 
 def get_db_info():
     """

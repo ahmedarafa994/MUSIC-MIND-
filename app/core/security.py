@@ -3,11 +3,12 @@ from typing import Any, Union, Optional
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from fastapi import HTTPException, status, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordBearer # Added OAuth2PasswordBearer
+from sqlalchemy.ext.asyncio import AsyncSession # Changed to AsyncSession
+from pydantic import BaseModel # Added for TokenPayload
 from app.core.config import settings
-from app.db.database import get_db
-from app.crud.user import user_crud
+from app.core.database import get_db # For async
+from app.crud.user import user as user_crud # Ensure this matches your crud instantiation
 from app.models.user import User
 import structlog
 
@@ -16,11 +17,20 @@ logger = structlog.get_logger()
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# JWT Security
-security = HTTPBearer()
+# OAuth2 scheme
+reusable_oauth2 = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.API_V1_STR}/auth/login",
+    scopes={"me": "Read information about the current user."}
+)
+
+class TokenPayload(BaseModel):
+    sub: Optional[str] = None
+    type: Optional[str] = None
+    scopes: List[str] = []
+
 
 def create_access_token(
-    subject: Union[str, Any], expires_delta: timedelta = None
+    subject: Union[str, Any], expires_delta: Optional[timedelta] = None, scopes: Optional[List[str]] = None
 ) -> str:
     """Create JWT access token"""
     if expires_delta:
@@ -30,29 +40,47 @@ def create_access_token(
             minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
         )
     
-    to_encode = {"exp": expire, "sub": str(subject), "type": "access"}
+    to_encode: Dict[str, Any] = {"exp": expire, "sub": str(subject), "type": "access"}
+    if scopes:
+        to_encode["scopes"] = scopes
+    else:
+        to_encode["scopes"] = []
+
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    logger.debug("Access token created", subject=str(subject))
     return encoded_jwt
 
-def create_refresh_token(subject: Union[str, Any]) -> str:
+def create_refresh_token(subject: Union[str, Any], expires_delta: Optional[timedelta] = None) -> str:
     """Create JWT refresh token"""
-    expire = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    if expires_delta: # Allow overriding refresh token expiry for specific cases
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+
     to_encode = {"exp": expire, "sub": str(subject), "type": "refresh"}
+    logger.debug("Refresh token created", subject=str(subject))
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
-def verify_token(token: str) -> dict:
-    """Verify and decode JWT token"""
+def _verify_token_payload(token: str) -> TokenPayload:
+    """Helper to verify and decode token into TokenPayload schema."""
     try:
-        payload = jwt.decode(
+        payload_dict = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
         )
-        return payload
+        return TokenPayload(**payload_dict)
     except JWTError as e:
-        logger.warning("JWT verification failed", error=str(e))
+        logger.warning("JWT verification failed", error=str(e), token_type=payload_dict.get("type") if 'payload_dict' in locals() else "unknown")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
+            detail="Could not validate credentials - token error",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error during token payload parsing: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials - payload error",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -84,76 +112,55 @@ def validate_password(password: str) -> bool:
     return True
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    token: str = Depends(reusable_oauth2),
+    db: AsyncSession = Depends(get_db)
 ) -> User:
-    """Get current authenticated user"""
-    if not credentials:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    """Get current authenticated user from access token."""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials - user retrieval",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     
-    try:
-        payload = verify_token(credentials.credentials)
-        user_id: str = payload.get("sub")
-        token_type: str = payload.get("type")
+    token_payload = _verify_token_payload(token)
         
-        if user_id is None or token_type != "access":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    if token_payload.sub is None or token_payload.type != "access":
+        logger.warning("Invalid token payload for access", payload_sub=token_payload.sub, payload_type=token_payload.type)
+        raise credentials_exception
     
-    user = user_crud.get(db, id=user_id)
+    user = await user_crud.get(db, id=token_payload.sub)
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        logger.warning("User from token not found in DB", user_id_from_token=token_payload.sub)
+        raise credentials_exception
     
     if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user"
-        )
+        logger.warning("Attempt to use token for inactive user", user_id=user.id)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
     
-    if user.is_account_locked():
-        raise HTTPException(
-            status_code=status.HTTP_423_LOCKED,
-            detail="Account is locked"
-        )
+    if hasattr(user, 'is_account_locked') and user.is_account_locked():
+        logger.warning("Attempt to use token for locked account", user_id=user.id)
+        raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Account is locked")
     
+    logger.debug("Current user retrieved", user_id=user.id)
     return user
 
 async def get_current_active_user(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    """Get current active user"""
-    if not current_user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
-            detail="Inactive user"
-        )
+    """Get current active user (relies on get_current_user to have already checked active status)"""
     return current_user
 
-async def get_current_superuser(
-    current_user: User = Depends(get_current_user),
+async def get_current_active_superuser(
+    current_user: User = Depends(get_current_active_user),
 ) -> User:
-    """Get current superuser"""
+    """Get current active superuser"""
     if not current_user.is_superuser:
+        logger.warning("Non-superuser attempted admin access", user_id=current_user.id)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
+            detail="The user doesn't have enough privileges"
         )
+    logger.debug("Superuser access granted", user_id=current_user.id)
     return current_user
 
 def check_user_permissions(user: User, required_permission: str) -> bool:
@@ -181,13 +188,14 @@ def generate_password_reset_token(email: str) -> str:
 def verify_password_reset_token(token: str) -> Optional[str]:
     """Verify password reset token and return email"""
     try:
-        decoded_token = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-        )
-        if decoded_token.get("type") != "password_reset":
+        token_payload = _verify_token_payload(token)
+        if token_payload.type != "password_reset" or token_payload.sub is None:
+            logger.warning("Invalid password reset token type or missing subject", token_type=token_payload.type)
             return None
-        return decoded_token["sub"]
-    except JWTError:
+        # Expiry is implicitly checked by jwt.decode in _verify_token_payload
+        return token_payload.sub
+    except HTTPException: # Raised by _verify_token_payload on JWTError/decode failure
+        logger.warning("Password reset token verification failed (JWTError or payload issue)")
         return None
 
 def generate_email_verification_token(email: str) -> str:
@@ -206,11 +214,11 @@ def generate_email_verification_token(email: str) -> str:
 def verify_email_verification_token(token: str) -> Optional[str]:
     """Verify email verification token and return email"""
     try:
-        decoded_token = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-        )
-        if decoded_token.get("type") != "email_verification":
+        token_payload = _verify_token_payload(token)
+        if token_payload.type != "email_verification" or token_payload.sub is None:
+            logger.warning("Invalid email verification token type or missing subject", token_type=token_payload.type)
             return None
-        return decoded_token["sub"]
-    except JWTError:
+        return token_payload.sub
+    except HTTPException:
+        logger.warning("Email verification token verification failed (JWTError or payload issue)")
         return None
