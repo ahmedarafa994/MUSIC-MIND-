@@ -31,11 +31,19 @@ const PROCESSING_OPTIONS = [
 ];
 
 export default function AudioMastering() {
-  const [selectedProcessing, setSelectedProcessing] = useState('master');
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [selectedProcessing, setSelectedProcessing] = useState('master'); // Could be 'landr' or 'matchering' directly
+  const [showAdvanced, setShowAdvanced] = useState(false); // Re-evaluate use of this
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  
+
+  // New state for mastering services
+  const [masteringServiceType, setMasteringServiceType] = useState<'landr' | 'matchering'>('landr');
+  const [landrOptions, setLandrOptions] = useState({ style: 'balanced', intensity: 'medium', loudness: -14 }); // Example LANDR defaults
+  const [matcheringReferenceFile, setMatcheringReferenceFile] = useState<File | null>(null);
+  // Example: [{type: 'pcm16', filename_suffix: '_16bit.wav'}]
+  const [matcheringOutputFormats, setMatcheringOutputFormats] = useState([{ type: 'pcm16', filename_suffix: '_16bit.wav' }]);
+
+
   const [processedFiles, setProcessedFiles] = useState([
     { 
       id: 'proc_123456', 
@@ -86,49 +94,78 @@ export default function AudioMastering() {
     
     setIsProcessing(true);
     
-    // Simulate API call
-    setTimeout(() => {
-      setProcessedFiles(prev => [
-        {
-          id: `proc_${Math.random().toString(36).substr(2, 9)}`,
-          filename: selectedFile.name,
-          status: 'processing',
-          date: new Date().toISOString().split('T')[0],
-          processingType: selectedProcessing,
-          originalUrl: 'https://example.com/original.mp3',
-          progress: 0
-        },
-        ...prev
-      ]);
-      
+    setIsProcessing(true);
+    toast.loading('Starting audio processing...');
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('mastering_service_type', masteringServiceType);
+
+    // Append service-specific options
+    if (masteringServiceType === 'landr') {
+      formData.append('landr_mastering_options_json', JSON.stringify(landrOptions));
+    } else if (masteringServiceType === 'matchering') {
+      if (matcheringReferenceFile) {
+        formData.append('reference_file', matcheringReferenceFile);
+      } else {
+        toast.error('Matchering requires a reference file.');
+        setIsProcessing(false);
+        return;
+      }
+      // Add output formats if they are configurable by user in future
+      formData.append('matchering_mastering_options_json', JSON.stringify({ output_formats: matcheringOutputFormats }));
+    }
+
+    // TODO: Add other general parameters like workflow_type, preset_name if needed by the backend endpoint for this specific call
+    // For now, assuming they might default or are not strictly needed if mastering_service_type is specified.
+    // formData.append('workflow_type', 'mastering_workflow'); // Example
+    // formData.append('preset_name', selectedProcessing); // if 'master' corresponds to a preset
+
+
+    // Replace with actual API endpoint
+    fetch('/api/v1/processing/upload-and-process', {
+      method: 'POST',
+      body: formData,
+      // Headers might be needed for auth (e.g., JWT token)
+      // headers: { 'Authorization': `Bearer ${your_auth_token}` }
+    })
+    .then(response => {
+      toast.dismiss(); // Dismiss loading toast
+      if (!response.ok) {
+        return response.json().then(err => { throw new Error(err.detail || 'Processing request failed') });
+      }
+      return response.json();
+    })
+    .then(data => {
+      if (data.job_id) {
+        toast.success(`Processing started! Job ID: ${data.job_id}`);
+        // Add to local list of processed files (or refresh from server)
+        setProcessedFiles(prev => [
+          {
+            id: data.job_id,
+            filename: selectedFile.name,
+            status: data.status || 'started', // API should return status
+            date: new Date().toISOString().split('T')[0],
+            processingType: masteringServiceType, // Use the service type
+            originalUrl: URL.createObjectURL(selectedFile), // For local preview if needed
+            progress: 0 // Initialize progress
+          },
+          ...prev
+        ]);
+        // TODO: Implement polling or WebSocket for job status updates instead of simulation
+      } else {
+        toast.error(data.message || 'Failed to start processing.');
+      }
+    })
+    .catch(error => {
+      toast.dismiss();
+      toast.error(`Error: ${error.message}`);
+    })
+    .finally(() => {
       setIsProcessing(false);
-      setSelectedFile(null);
-      toast.success('Audio processing started!');
-      
-      // Simulate progress updates
-      const interval = setInterval(() => {
-        setProcessedFiles(prev => {
-          const updated = [...prev];
-          const processingFile = updated.find(f => f.status === 'processing');
-          
-          if (processingFile) {
-            if (!processingFile.progress) processingFile.progress = 0;
-            processingFile.progress += 10;
-            
-            if (processingFile.progress >= 100) {
-              processingFile.status = 'completed';
-              processingFile.processedUrl = 'https://example.com/processed.mp3';
-              clearInterval(interval);
-              toast.success('Audio processing completed!');
-            }
-          } else {
-            clearInterval(interval);
-          }
-          
-          return updated;
-        });
-      }, 1000);
-    }, 1500);
+      setSelectedFile(null); // Clear selected file after attempt
+      setMatcheringReferenceFile(null); // Clear reference file
+    });
   };
   
   const selectedOption = PROCESSING_OPTIONS.find(opt => opt.id === selectedProcessing);
@@ -208,56 +245,102 @@ export default function AudioMastering() {
               ))}
             </div>
             
-            {/* Advanced Settings */}
+            {/* Mastering Service Selector */}
+            <div className="my-6">
+              <h3 className="text-md font-semibold text-gray-800 mb-2">Mastering Service</h3>
+              <div className="flex space-x-4">
+                {(['landr', 'matchering'] as const).map((service) => (
+                  <button
+                    key={service}
+                    onClick={() => setMasteringServiceType(service)}
+                    className={`px-4 py-2 rounded-md text-sm font-medium transition-colors
+                      ${masteringServiceType === service
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                  >
+                    {service.charAt(0).toUpperCase() + service.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Advanced Settings - now conditional based on service */}
             <div className="border-t pt-4">
               <button
                 onClick={() => setShowAdvanced(!showAdvanced)}
                 className="flex items-center space-x-2 text-gray-600 hover:text-gray-900"
               >
                 <Settings className="h-4 w-4" />
-                <span>Advanced Settings</span>
+                <span>{masteringServiceType.charAt(0).toUpperCase() + masteringServiceType.slice(1)} Settings</span>
               </button>
               
               {showAdvanced && (
                 <div className="mt-4 space-y-4 bg-gray-50 p-4 rounded-lg">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* LANDR Specific Settings */}
+                  {masteringServiceType === 'landr' && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Target LUFS
-                      </label>
-                      <input
-                        type="number"
-                        defaultValue={-14}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        min="-30"
-                        max="0"
-                      />
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">LANDR Options</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label htmlFor="landrStyle" className="block text-sm font-medium text-gray-700 mb-1">Style</label>
+                          <select
+                            id="landrStyle"
+                            value={landrOptions.style}
+                            onChange={(e) => setLandrOptions(prev => ({ ...prev, style: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            {['balanced', 'warm', 'open', 'punchy'].map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label htmlFor="landrIntensity" className="block text-sm font-medium text-gray-700 mb-1">Intensity</label>
+                          <select
+                            id="landrIntensity"
+                            value={landrOptions.intensity}
+                            onChange={(e) => setLandrOptions(prev => ({ ...prev, intensity: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          >
+                            {['low', 'medium', 'high'].map(i => <option key={i} value={i}>{i.charAt(0).toUpperCase() + i.slice(1)}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label htmlFor="landrLoudness" className="block text-sm font-medium text-gray-700 mb-1">Target Loudness (LUFS)</label>
+                          <input
+                            type="number"
+                            id="landrLoudness"
+                            value={landrOptions.loudness}
+                            onChange={(e) => setLandrOptions(prev => ({ ...prev, loudness: parseInt(e.target.value) }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            min="-23" max="-6" step="1"
+                          />
+                        </div>
+                      </div>
                     </div>
+                  )}
+
+                  {/* Matchering Specific Settings */}
+                  {masteringServiceType === 'matchering' && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Limit Threshold (dB)
-                      </label>
-                      <input
-                        type="number"
-                        defaultValue={-1}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        min="-10"
-                        max="0"
-                        step="0.1"
-                      />
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Matchering Options</h4>
+                      <div>
+                        <label htmlFor="matcheringReference" className="block text-sm font-medium text-gray-700 mb-1">
+                          Reference Audio File
+                        </label>
+                        <input
+                          type="file"
+                          id="matcheringReference"
+                          accept="audio/*"
+                          onChange={(e) => setMatcheringReferenceFile(e.target.files ? e.target.files[0] : null)}
+                          className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                        />
+                        {matcheringReferenceFile && <p className="text-xs text-gray-500 mt-1">Selected: {matcheringReferenceFile.name}</p>}
+                      </div>
+                      {/* Placeholder for output format selection if needed */}
+                       <div className="mt-2">
+                         <p className="text-xs text-gray-600">Output will be 16-bit WAV by default. Advanced format selection can be added here.</p>
+                       </div>
                     </div>
-                  </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="enhanceVocals"
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <label htmlFor="enhanceVocals" className="text-sm text-gray-700">
-                      Enhance Vocals
-                    </label>
-                  </div>
+                  )}
                 </div>
               )}
             </div>

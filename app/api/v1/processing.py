@@ -21,6 +21,22 @@ class ProcessingRequest(BaseSchema):
     target_genre: str = Field(default="auto", description="Target genre for processing")
     quality_priority: str = Field(default="balanced", description="Quality priority: speed, balanced, quality")
 
+    # Mastering specific options
+    mastering_service_type: Optional[str] = Field(
+        default="landr",
+        description="Mastering service: 'landr' or 'matchering'"
+    )
+    landr_mastering_options: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Options for LANDR mastering (e.g., {'intensity': 'medium', 'style': 'balanced'})"
+    )
+    # For Matchering, reference_file_id would point to an already uploaded file.
+    # output_formats is a list of dicts, e.g., [{'type': 'pcm16', 'filename_suffix': '_16bit.wav'}]
+    matchering_mastering_options: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Options for Matchering (e.g., {'reference_audio_file_id': 'uuid', 'output_formats': []})"
+    )
+
 class ProcessingResponse(BaseSchema):
     job_id: str
     status: str
@@ -41,39 +57,94 @@ class JobStatusResponse(BaseSchema):
 @router.post("/upload-and-process", response_model=ProcessingResponse)
 async def upload_and_process_audio(
     file: UploadFile = File(...),
+    reference_file: Optional[UploadFile] = File(None, description="Reference audio file for Matchering"),
     workflow_type: str = "auto",
     preset_name: str = "standard_mastering",
     creativity_level: str = "medium",
     target_genre: str = "auto",
+    mastering_service_type: Optional[str] = "landr",
+    landr_mastering_options_json: Optional[str] = Field(None, description="JSON string for LANDR options"),
+    matchering_mastering_options_json: Optional[str] = Field(None, description="JSON string for Matchering options (e.g. output_formats)"),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """Upload audio file and start processing"""
+    """Upload audio file (and optional reference file) and start processing."""
     
-    # Validate file type
+    import json
+
+    # Validate target file type
     if not file.content_type.startswith('audio/'):
-        raise HTTPException(
-            status_code=400,
-            detail="File must be an audio file"
-        )
+        raise HTTPException(status_code=400, detail="Target file must be an audio file")
     
-    # Save uploaded file
-    file_id = str(uuid.uuid4())
-    file_extension = os.path.splitext(file.filename)[1]
-    filename = f"{file_id}{file_extension}"
-    file_path = f"/tmp/{filename}"
+    # Save target uploaded file
+    target_file_id = str(uuid.uuid4())
+    target_file_extension = os.path.splitext(file.filename)[1]
+    target_filename = f"{target_file_id}{target_file_extension}"
+    # Consider using a settings-defined upload path
+    target_file_path = os.path.join(settings.UPLOAD_PATH, target_filename)
+    os.makedirs(settings.UPLOAD_PATH, exist_ok=True)
     
-    with open(file_path, "wb") as buffer:
+    with open(target_file_path, "wb") as buffer:
         content = await file.read()
         buffer.write(content)
+
+    # Handle reference file for Matchering
+    reference_file_path = None
+    if mastering_service_type == "matchering" and reference_file:
+        if not reference_file.content_type.startswith('audio/'):
+            # Clean up target file if reference is invalid
+            os.remove(target_file_path)
+            raise HTTPException(status_code=400, detail="Reference file must be an audio file")
+
+        ref_file_id = str(uuid.uuid4())
+        ref_file_extension = os.path.splitext(reference_file.filename)[1]
+        ref_filename = f"ref_{ref_file_id}{ref_file_extension}"
+        reference_file_path = os.path.join(settings.UPLOAD_PATH, ref_filename)
+
+        with open(reference_file_path, "wb") as buffer:
+            content = await reference_file.read()
+            buffer.write(content)
+    elif mastering_service_type == "matchering" and not reference_file:
+        # Clean up target file if reference is required but not provided
+        os.remove(target_file_path)
+        raise HTTPException(status_code=400, detail="Reference file is required for Matchering service.")
+
+    # Parse JSON options
+    parsed_landr_options = None
+    if landr_mastering_options_json:
+        try:
+            parsed_landr_options = json.loads(landr_mastering_options_json)
+        except json.JSONDecodeError:
+            if reference_file_path: os.remove(reference_file_path) # Cleanup
+            os.remove(target_file_path) # Cleanup
+            raise HTTPException(status_code=400, detail="Invalid JSON format for LANDR options.")
+
+    parsed_matchering_options = {} # Default to empty dict
+    if matchering_mastering_options_json:
+        try:
+            parsed_matchering_options = json.loads(matchering_mastering_options_json)
+        except json.JSONDecodeError:
+            if reference_file_path: os.remove(reference_file_path) # Cleanup
+            os.remove(target_file_path) # Cleanup
+            raise HTTPException(status_code=400, detail="Invalid JSON format for Matchering options.")
     
+    # Add reference file path to matchering options if it was uploaded
+    if reference_file_path:
+        parsed_matchering_options["reference_audio_file_path"] = reference_file_path
+
+
     # Create workflow configuration
     workflow_config = {
         "type": workflow_type,
         "preset": preset_name,
         "creativity": creativity_level,
         "target_genre": target_genre,
-        "steps": []  # For custom workflows
+        "steps": [],  # For custom workflows
+        "mastering_settings": {
+            "service_type": mastering_service_type,
+            "landr_options": parsed_landr_options,
+            "matchering_options": parsed_matchering_options,
+        }
     }
     
     # Start processing job
@@ -115,7 +186,14 @@ async def process_existing_audio(
         "preset": request.preset_name,
         "creativity": request.creativity_level,
         "target_genre": request.target_genre,
-        "steps": request.custom_steps
+        "steps": request.custom_steps,
+        # Mastering specific configurations
+        "mastering_settings": {
+            "service_type": request.mastering_service_type,
+            "landr_options": request.landr_mastering_options,
+            "matchering_options": request.matchering_mastering_options,
+             # Note: For Matchering, orchestrator will need to resolve reference_audio_file_id to a path
+        }
     }
     
     try:
