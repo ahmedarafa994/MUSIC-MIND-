@@ -1,0 +1,83 @@
+# Core dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic[email]==2.5.0
+sqlalchemy==2.0.23
+alembic==1.13.0
+
+# Authentication and security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# Database drivers
+psycopg2-binary==2.9.9  # PostgreSQL
+aiosqlite==0.19.0       # SQLite async
+
+# File handling
+aiofiles==23.2.1
+python-magic==0.4.27
+pillow==10.1.0
+
+# Audio processing
+librosa==0.10.1
+soundfile==0.12.1
+pydub==0.25.1
+
+# AI/ML libraries
+openai==1.3.5
+replicate==0.13.1
+numpy==1.24.4
+torch==2.1.1
+transformers==4.35.2
+
+# HTTP client
+httpx==0.25.2
+requests==2.31.0
+
+# Caching and sessions
+redis==5.0.1
+python-redis==5.0.1
+
+# Email
+fastapi-mail==1.4.1
+
+# Monitoring and logging
+python-json-logger==2.0.7
+sentry-sdk[fastapi]==1.38.0
+
+# Cloud storage
+boto3==1.34.0           # AWS S3
+google-cloud-storage==2.10.0  # Google Cloud Storage
+azure-storage-blob==12.19.0   # Azure Blob Storage
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+httpx==0.25.2
+
+# Development
+black==23.11.0
+isort==5.12.0
+flake8==6.1.0
+mypy==1.7.1
+
+# Documentation
+mkdocs==1.5.3
+mkdocs-material==9.4.8
+
+# Environment
+python-dotenv==1.0.0
+
+# Background tasks
+celery==5.3.4
+kombu==5.3.4
+
+# Rate limiting
+slowapi==0.1.9
+
+# WebSocket support
+websockets==12.0
+
+# Validation
+email-validator==2.1.0

@@ -1,0 +1,211 @@
+version: '3.8'
+
+services:
+  # Main API Gateway
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@db:5432/music_mastering
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=true
+    volumes:
+      - ./uploads:/app/uploads
+      - ./temp:/app/temp
+      - ./logs:/app/logs
+    depends_on:
+      - db
+      - redis
+      - music-gen-service
+      - stable-audio-service
+    restart: unless-stopped
+
+  # Database Services
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=music_mastering
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # AI Model Services
+  music-gen-service:
+    build:
+      context: ./services/music-gen
+      dockerfile: Dockerfile
+    environment:
+      - MODEL_NAME=music_gen
+      - GPU_ENABLED=true
+    volumes:
+      - model_cache:/app/models
+    restart: unless-stopped
+
+  stable-audio-service:
+    build:
+      context: ./services/stable-audio
+      dockerfile: Dockerfile
+    environment:
+      - MODEL_NAME=stable_audio
+      - GPU_ENABLED=true
+    volumes:
+      - model_cache:/app/models
+    restart: unless-stopped
+
+  music-lm-service:
+    build:
+      context: ./services/music-lm
+      dockerfile: Dockerfile
+    environment:
+      - MODEL_NAME=music_lm
+    volumes:
+      - model_cache:/app/models
+    restart: unless-stopped
+
+  audiocraft-service:
+    build:
+      context: ./services/audiocraft
+      dockerfile: Dockerfile
+    environment:
+      - MODEL_NAME=audiocraft
+      - GPU_ENABLED=true
+    volumes:
+      - model_cache:/app/models
+    restart: unless-stopped
+
+  jukebox-service:
+    build:
+      context: ./services/jukebox
+      dockerfile: Dockerfile
+    environment:
+      - MODEL_NAME=jukebox
+      - GPU_ENABLED=true
+    volumes:
+      - model_cache:/app/models
+    restart: unless-stopped
+
+  melody-rnn-service:
+    build:
+      context: ./services/melody-rnn
+      dockerfile: Dockerfile
+    environment:
+      - MODEL_NAME=melody_rnn
+    volumes:
+      - model_cache:/app/models
+    restart: unless-stopped
+
+  music-vae-service:
+    build:
+      context: ./services/music-vae
+      dockerfile: Dockerfile
+    environment:
+      - MODEL_NAME=music_vae
+    volumes:
+      - model_cache:/app/models
+    restart: unless-stopped
+
+  aces-service:
+    build:
+      context: ./services/aces
+      dockerfile: Dockerfile
+    environment:
+      - MODEL_NAME=aces
+      - GPU_ENABLED=true
+    volumes:
+      - model_cache:/app/models
+    restart: unless-stopped
+
+  rhythm-service:
+    build:
+      context: ./services/rhythm
+      dockerfile: Dockerfile
+    environment:
+      - MODEL_NAME=tepand_diff_rhythm
+    volumes:
+      - model_cache:/app/models
+    restart: unless-stopped
+
+  suni-service:
+    build:
+      context: ./services/suni
+      dockerfile: Dockerfile
+    environment:
+      - MODEL_NAME=suni
+    volumes:
+      - model_cache:/app/models
+    restart: unless-stopped
+
+  beethoven-service:
+    build:
+      context: ./services/beethoven
+      dockerfile: Dockerfile
+    environment:
+      - MODEL_NAME=beethoven_ai
+    volumes:
+      - model_cache:/app/models
+    restart: unless-stopped
+
+  mureka-service:
+    build:
+      context: ./services/mureka
+      dockerfile: Dockerfile
+    environment:
+      - MODEL_NAME=mureka
+    volumes:
+      - model_cache:/app/models
+    restart: unless-stopped
+
+  # Load Balancer
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./uploads:/usr/share/nginx/html/uploads
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # Monitoring
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  model_cache:
+  grafana_data:
+
+networks:
+  default:
+    driver: bridge
