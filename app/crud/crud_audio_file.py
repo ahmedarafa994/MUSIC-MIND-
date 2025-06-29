@@ -223,3 +223,71 @@ class CRUDAudioFile(CRUDBase[AudioFile, AudioFileCreate, AudioFileUpdate]):
         }
 
 audio_file = CRUDAudioFile(AudioFile)
+
+
+# Synchronous function for creating derived audio file records
+# This is to be called from the audio_processing_api.py which uses synchronous DB sessions for now.
+def create_sync_derived_audio_file(
+    db: Session, # Note: Synchronous Session
+    *,
+    user_id: uuid.UUID,
+    original_audio_file_model: AudioFile, # The SQLAlchemy model instance of the original file
+    new_filename: str, # System-generated unique name for storage
+    new_original_filename: str, # User-facing name
+    new_file_path: str,
+    new_file_size: int,
+    new_mime_type: str,
+    new_status: str = "completed",
+    s3_bucket: Optional[str] = None,
+    s3_key: Optional[str] = None,
+    duration: Optional[float] = None,
+    sample_rate: Optional[int] = None,
+    channels: Optional[int] = None,
+    bit_rate: Optional[int] = None,
+    processing_log: Optional[Dict[str, Any]] = None,
+    genre: Optional[str] = None,
+    mood: Optional[str] = None
+) -> AudioFile:
+    """
+    Creates a new audio file record in the database using a synchronous session.
+    """
+    genre_to_set = genre if genre is not None else original_audio_file_model.genre
+    mood_to_set = mood if mood is not None else original_audio_file_model.mood
+
+    # Assuming AudioFile model has fields:
+    # id (default=uuid.uuid4()), created_at (default=now), updated_at (default=now, onupdate=now)
+    # play_count, download_count (default to 0 or None)
+    # Ensure 'bit_rate', 'source_audio_id', 'processing_log' fields exist in AudioFile model if used.
+
+    db_obj = AudioFile(
+        id=uuid.uuid4(), # Explicitly generate UUID here if model doesn't auto-gen on non-commit
+        user_id=user_id,
+        filename=new_filename,
+        original_filename=new_original_filename,
+        file_path=new_file_path,
+        file_size=new_file_size,
+        mime_type=new_mime_type,
+        status=new_status,
+        s3_bucket=s3_bucket,
+        s3_key=s3_key,
+        duration=duration,
+        sample_rate=sample_rate,
+        channels=channels,
+        bit_rate=bit_rate,
+        # source_audio_id=original_audio_file_model.id, # Uncomment if model has this field
+        processing_log=processing_log,
+        genre=genre_to_set,
+        mood=mood_to_set,
+        is_public=original_audio_file_model.is_public, # Inherit publicity
+        is_deleted=False
+    )
+    db.add(db_obj)
+    db.commit()
+    db.refresh(db_obj)
+    logger.info(
+        "SYNC Derived audio file created",
+        new_audio_file_id=db_obj.id,
+        original_audio_file_id=original_audio_file_model.id,
+        user_id=user_id
+    )
+    return db_obj
