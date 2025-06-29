@@ -109,7 +109,7 @@ class AudioFileUploadResponse(BaseSchema):
 # Audio processing schemas
 class AudioProcessingRequest(BaseSchema):
     audio_file_id: uuid.UUID
-    processing_type: str = Field(..., regex="^(normalize|enhance|master|analyze)$")
+    processing_type: str = Field(..., pattern="^(normalize|enhance|master|analyze)$")
     parameters: Optional[Dict[str, Any]] = None
 
 class AudioProcessingResponse(BaseSchema):
@@ -121,7 +121,7 @@ class AudioProcessingResponse(BaseSchema):
 # Audio analysis schemas
 class AudioAnalysisRequest(BaseSchema):
     audio_file_id: uuid.UUID
-    analysis_type: str = Field(..., regex="^(full|basic|spectral|rhythm|harmony)$")
+    analysis_type: str = Field(..., pattern="^(full|basic|spectral|rhythm|harmony)$")
     include_visualization: bool = False
 
 class AudioAnalysisResponse(BaseSchema):
@@ -158,8 +158,8 @@ class MasteringResponse(BaseSchema):
 # Audio format conversion schemas
 class FormatConversionRequest(BaseSchema):
     audio_file_id: uuid.UUID
-    target_format: str = Field(..., regex="^(mp3|wav|flac|aac|ogg)$")
-    quality: str = Field(default="high", regex="^(low|medium|high|lossless)$")
+    target_format: str = Field(..., pattern="^(mp3|wav|flac|aac|ogg)$")
+    quality: str = Field(default="high", pattern="^(low|medium|high|lossless)$")
     sample_rate: Optional[int] = Field(None, ge=8000, le=192000)
     bit_rate: Optional[int] = Field(None, ge=64, le=320)
 
@@ -200,7 +200,7 @@ class AudioFileStats(BaseSchema):
 # Audio file sharing schemas
 class AudioFileShareRequest(BaseSchema):
     audio_file_id: uuid.UUID
-    share_type: str = Field(..., regex="^(public|private|link)$")
+    share_type: str = Field(..., pattern="^(public|private|link)$")
     expires_at: Optional[datetime] = None
     password: Optional[str] = Field(None, max_length=100)
     allow_download: bool = True
@@ -230,7 +230,7 @@ class AudioFileVersionHistory(BaseSchema):
 # Batch operations
 class BatchAudioOperation(BaseSchema):
     file_ids: List[uuid.UUID] = Field(..., min_items=1, max_items=50)
-    operation: str = Field(..., regex="^(delete|archive|make_public|make_private|analyze)$")
+    operation: str = Field(..., pattern="^(delete|archive|make_public|make_private|analyze)$")
     parameters: Optional[Dict[str, Any]] = None
 
 class BatchAudioOperationResult(BaseSchema):

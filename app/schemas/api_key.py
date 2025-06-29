@@ -113,7 +113,7 @@ class APIKeySecurityEvent(BaseSchema):
     ip_address: str
     user_agent: Optional[str]
     timestamp: datetime
-    severity: str = Field(..., regex="^(low|medium|high|critical)$")
+    severity: str = Field(..., pattern="^(low|medium|high|critical)$")
     metadata: Optional[dict] = None
 
 class APIKeySecurityLog(BaseSchema):
@@ -138,7 +138,7 @@ class APIKeyRotationResponse(BaseSchema):
 # Bulk API key operations
 class BulkAPIKeyOperation(BaseSchema):
     api_key_ids: List[uuid.UUID] = Field(..., min_items=1, max_items=50)
-    operation: str = Field(..., regex="^(activate|deactivate|delete|extend_expiry)$")
+    operation: str = Field(..., pattern="^(activate|deactivate|delete|extend_expiry)$")
     parameters: Optional[dict] = None
 
 class BulkAPIKeyOperationResult(BaseSchema):
@@ -197,7 +197,7 @@ class APIKeyExport(BaseSchema):
     include_security_events: bool = False
     date_range_start: Optional[datetime] = None
     date_range_end: Optional[datetime] = None
-    format: str = Field(default="json", regex="^(json|csv)$")
+    format: str = Field(default="json", pattern="^(json|csv)$")
 
 class APIKeyExportResponse(BaseSchema):
     export_id: uuid.UUID

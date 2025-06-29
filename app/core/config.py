@@ -1,6 +1,7 @@
 import os
 from typing import List, Optional, Union
-from pydantic import BaseSettings, AnyHttpUrl, validator
+from pydantic_settings import BaseSettings
+from pydantic import AnyHttpUrl, validator
 from functools import lru_cache
 
 class Settings(BaseSettings):
@@ -17,7 +18,7 @@ class Settings(BaseSettings):
     ALLOWED_HOSTS: List[str] = ["*"]
     
     # Database settings
-    DATABASE_URL: str = "sqlite:///./music_mastering.db"
+    DATABASE_URL: str = "sqlite+aiosqlite:///./music_mastering.db" # Use async driver
     
     # Redis settings (for caching and sessions)
     REDIS_URL: Optional[str] = "redis://localhost:6379/0"

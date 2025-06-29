@@ -144,11 +144,11 @@ class CRUDAgentSession(CRUDBase[AgentSession, AgentSessionCreate, AgentSessionUp
         #     session.estimated_completion_time = estimated_completion_time
 
         # A common pattern is to store such dynamic progress info in a JSON field
-        if session.metadata is None:
-            session.metadata = {}
-        session.metadata['progress'] = progress
+        if session.additional_metadata is None:
+            session.additional_metadata = {}
+        session.additional_metadata['progress'] = progress
         if current_step:
-            session.metadata['current_step'] = current_step
+            session.additional_metadata['current_step'] = current_step
 
         session.updated_at = datetime.utcnow()
         db.add(session)

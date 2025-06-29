@@ -20,17 +20,17 @@ python-magic==0.4.27
 pillow==10.1.0
 
 # Audio processing
-librosa==0.10.1
-soundfile==0.12.1
-pydub==0.25.1
-matchering==2.0.2
+# librosa==0.10.1
+# soundfile==0.12.1
+pydub==0.25.1 # pydub is relatively lightweight, might be okay
+# matchering==2.0.2
 
 # AI/ML libraries
-openai==1.3.5
-replicate==0.13.1
-numpy==1.24.4
-torch==2.1.1
-transformers==4.35.2
+# openai==1.3.5
+# replicate==0.13.0
+# numpy==1.26.0
+# torch==2.2.0
+# transformers==4.35.2
 
 # HTTP client
 httpx==0.25.2
@@ -38,13 +38,13 @@ requests==2.31.0
 
 # Caching and sessions
 redis==5.0.1
-python-redis==5.0.1
 
 # Email
 fastapi-mail==1.4.1
 
 # Monitoring and logging
 python-json-logger==2.0.7
+structlog==24.1.0
 sentry-sdk[fastapi]==1.38.0
 
 # Cloud storage

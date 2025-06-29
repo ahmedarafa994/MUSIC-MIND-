@@ -61,7 +61,7 @@ class AgentSession(Base):
     output_file_paths = Column(JSON, nullable=True)  # List of generated file paths
     final_response = Column(Text, nullable=True)
     quality_metrics = Column(JSON, nullable=True)
-    metadata = Column(JSON, nullable=True)  # Additional session metadata
+    additional_metadata = Column(JSON, nullable=True)  # Additional session metadata
     
     # Error handling
     error_message = Column(Text, nullable=True)

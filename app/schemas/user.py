@@ -7,7 +7,7 @@ from .common import BaseSchema, SubscriptionTier
 # Base user schemas
 class UserBase(BaseSchema):
     email: EmailStr
-    username: str = Field(..., min_length=3, max_length=50, regex="^[a-zA-Z0-9_-]+$")
+    username: str = Field(..., min_length=3, max_length=50, pattern="^[a-zA-Z0-9_-]+$")
     full_name: Optional[str] = Field(None, max_length=255)
     bio: Optional[str] = Field(None, max_length=1000)
     phone_number: Optional[str] = Field(None, max_length=20)
@@ -105,24 +105,24 @@ class SubscriptionInfo(BaseSchema):
 
 # User preferences
 class UserPreferences(BaseSchema):
-    theme: str = Field(default="light", regex="^(light|dark|auto)$")
+    theme: str = Field(default="light", pattern="^(light|dark|auto)$")
     language: str = Field(default="en", max_length=5)
     notifications_email: bool = True
     notifications_push: bool = True
     notifications_sms: bool = False
-    default_audio_quality: str = Field(default="high", regex="^(low|medium|high|lossless)$")
+    default_audio_quality: str = Field(default="high", pattern="^(low|medium|high|lossless)$")
     auto_save_projects: bool = True
-    privacy_level: str = Field(default="private", regex="^(public|friends|private)$")
+    privacy_level: str = Field(default="private", pattern="^(public|friends|private)$")
 
 class UserPreferencesUpdate(BaseSchema):
-    theme: Optional[str] = Field(None, regex="^(light|dark|auto)$")
+    theme: Optional[str] = Field(None, pattern="^(light|dark|auto)$")
     language: Optional[str] = Field(None, max_length=5)
     notifications_email: Optional[bool] = None
     notifications_push: Optional[bool] = None
     notifications_sms: Optional[bool] = None
-    default_audio_quality: Optional[str] = Field(None, regex="^(low|medium|high|lossless)$")
+    default_audio_quality: Optional[str] = Field(None, pattern="^(low|medium|high|lossless)$")
     auto_save_projects: Optional[bool] = None
-    privacy_level: Optional[str] = Field(None, regex="^(public|friends|private)$")
+    privacy_level: Optional[str] = Field(None, pattern="^(public|friends|private)$")
 
 # User search and filtering
 class UserSearchParams(BaseSchema):
@@ -172,7 +172,7 @@ class UserDataExportRequest(BaseSchema):
     include_files: bool = True
     include_sessions: bool = True
     include_activity_log: bool = False
-    format: str = Field(default="json", regex="^(json|csv|xml)$")
+    format: str = Field(default="json", pattern="^(json|csv|xml)$")
 
 class UserDataExportResponse(BaseSchema):
     export_id: str
@@ -183,7 +183,7 @@ class UserDataExportResponse(BaseSchema):
 
 class UserDeletionRequest(BaseSchema):
     password: str
-    confirmation: str = Field(..., regex="^DELETE$")
+    confirmation: str = Field(..., pattern="^DELETE$")
     reason: Optional[str] = Field(None, max_length=500)
 
     @validator('confirmation')
@@ -195,7 +195,7 @@ class UserDeletionRequest(BaseSchema):
 # Bulk user operations (admin only)
 class BulkUserOperation(BaseSchema):
     user_ids: List[uuid.UUID] = Field(..., min_items=1, max_items=100)
-    operation: str = Field(..., regex="^(activate|deactivate|verify|unverify|delete)$")
+    operation: str = Field(..., pattern="^(activate|deactivate|verify|unverify|delete)$")
     reason: Optional[str] = Field(None, max_length=500)
 
 class BulkUserOperationResult(BaseSchema):

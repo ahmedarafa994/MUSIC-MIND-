@@ -41,7 +41,7 @@ class PaginationParams(BaseSchema):
     page: int = Field(default=1, ge=1, description="Page number")
     size: int = Field(default=20, ge=1, le=100, description="Items per page")
     sort_by: Optional[str] = Field(None, max_length=50, description="Field to sort by")
-    sort_order: str = Field(default="desc", regex="^(asc|desc)$", description="Sort order")
+    sort_order: str = Field(default="desc", pattern="^(asc|desc)$", description="Sort order")
 
 T = TypeVar('T')
 
