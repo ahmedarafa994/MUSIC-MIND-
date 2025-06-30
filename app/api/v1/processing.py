@@ -1,15 +1,17 @@
 from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession # Changed import
 import uuid
 import os
+import aiofiles # For async file operations
 
-from app.db.database import get_db
+from app.db.database import get_async_db # Changed import
 from app.core.security import get_current_active_user
 from app.models.user import User
 from app.services.master_chain_orchestrator import orchestrator
 from app.schemas import BaseSchema
 from pydantic import Field
+from app.core.config import settings # For TEMP_PATH
 
 router = APIRouter()
 
@@ -46,42 +48,44 @@ async def upload_and_process_audio(
     creativity_level: str = "medium",
     target_genre: str = "auto",
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    # db: AsyncSession = Depends(get_async_db) # DB Session no longer needed here
 ):
     """Upload audio file and start processing"""
     
-    # Validate file type
     if not file.content_type.startswith('audio/'):
         raise HTTPException(
             status_code=400,
             detail="File must be an audio file"
         )
     
-    # Save uploaded file
+    # Ensure temp directory exists (can be done at startup as well)
+    os.makedirs(settings.TEMP_PATH, exist_ok=True)
+
     file_id = str(uuid.uuid4())
     file_extension = os.path.splitext(file.filename)[1]
     filename = f"{file_id}{file_extension}"
-    file_path = f"/tmp/{filename}"
+    file_path = os.path.join(settings.TEMP_PATH, filename) # Use configured TEMP_PATH
     
-    with open(file_path, "wb") as buffer:
-        content = await file.read()
-        buffer.write(content)
-    
-    # Create workflow configuration
+    try:
+        async with aiofiles.open(file_path, "wb") as buffer: # Async file write
+            content = await file.read()
+            await buffer.write(content)
+    except Exception as e_write:
+        raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {str(e_write)}")
+
     workflow_config = {
         "type": workflow_type,
         "preset": preset_name,
         "creativity": creativity_level,
         "target_genre": target_genre,
-        "steps": []  # For custom workflows
+        "steps": []
     }
     
-    # Start processing job
     try:
         job_id = await orchestrator.create_processing_job(
             user_id=str(current_user.id),
-            project_id=str(uuid.uuid4()),  # Generate project ID
-            input_audio_path=file_path,
+            project_id=str(uuid.uuid4()),
+            input_audio_path=file_path, # Orchestrator will be responsible for this temp file's lifecycle
             workflow_config=workflow_config
         )
         
@@ -92,6 +96,13 @@ async def upload_and_process_audio(
         )
         
     except Exception as e:
+        # Clean up the temp file if job creation failed
+        if os.path.exists(file_path):
+            try:
+                await aiofiles.os.remove(file_path)
+            except Exception as e_remove:
+                # Log cleanup error
+                pass
         raise HTTPException(
             status_code=500,
             detail=f"Failed to start processing: {str(e)}"
@@ -100,14 +111,23 @@ async def upload_and_process_audio(
 @router.post("/process-existing", response_model=ProcessingResponse)
 async def process_existing_audio(
     request: ProcessingRequest,
-    audio_file_id: str,
+    audio_file_id: str, # This should ideally be a UUID and point to a file in DB
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    # db: AsyncSession = Depends(get_async_db) # DB Session no longer needed here directly
 ):
     """Process an existing audio file"""
     
-    # In a real implementation, you'd fetch the file from database
-    # For now, we'll simulate with a dummy path
+    # In a real implementation, you'd fetch the file_path from the database
+    # using audio_file_id and an async CRUD operation.
+    # For now, we'll simulate with a dummy path.
+    # This part needs integration with AudioFile CRUD if it's to use existing files.
+    # Example:
+    # audio_file_record = await async_crud_audio_file.get(db, id=audio_file_id)
+    # if not audio_file_record or not audio_file_record.file_path:
+    #     raise HTTPException(status_code=404, detail="Audio file not found or path missing")
+    # file_path = audio_file_record.file_path
+
+    # Using placeholder as per original logic, assuming orchestrator handles path validity
     file_path = f"/tmp/existing_{audio_file_id}.wav"
     
     workflow_config = {
@@ -122,7 +142,7 @@ async def process_existing_audio(
         job_id = await orchestrator.create_processing_job(
             user_id=str(current_user.id),
             project_id=str(uuid.uuid4()),
-            input_audio_path=file_path,
+            input_audio_path=file_path, # Orchestrator needs to handle this path
             workflow_config=workflow_config
         )
         

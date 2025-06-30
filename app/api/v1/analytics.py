@@ -1,14 +1,14 @@
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession # Changed import
 from datetime import datetime, timedelta
 import uuid
 
-from app.db.database import get_db
+from app.db.database import get_async_db # Changed import
 from app.core.security import get_current_active_user, get_current_superuser
 from app.models.user import User
-from app.services.cost_tracker import cost_tracker
-from app.services.master_chain_orchestrator import orchestrator
+from app.services.cost_tracker import cost_tracker # cost_tracker methods may need to become async later
+from app.services.master_chain_orchestrator import orchestrator # orchestrator methods may need to become async later
 from app.schemas import BaseSchema
 
 router = APIRouter()
@@ -34,14 +34,14 @@ class CostAnalyticsResponse(BaseSchema):
 async def get_user_processing_analytics(
     days: int = Query(default=7, ge=1, le=90),
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db) # Changed
 ):
     """Get user's processing analytics for the specified period"""
     
     end_date = datetime.utcnow()
     start_date = end_date - timedelta(days=days)
     
-    # In a real implementation, this would query the database
+    # In a real implementation, this would query the database asynchronously
     # For now, we'll simulate analytics data
     
     import random
@@ -76,14 +76,15 @@ async def get_user_processing_analytics(
 async def get_user_cost_analytics(
     days: int = Query(default=30, ge=1, le=365),
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db) # Changed
 ):
     """Get user's cost analytics for the specified period"""
     
     end_date = datetime.utcnow()
     start_date = end_date - timedelta(days=days)
     
-    cost_data = await cost_tracker.get_user_costs(
+    # cost_tracker.get_user_costs will need to be async when cost_tracker uses DB
+    cost_data = await cost_tracker.get_user_costs( # Assuming get_user_costs becomes async
         str(current_user.id), 
         start_date, 
         end_date

@@ -8,7 +8,13 @@ class AudioAnalyzer:
     """Analyzes audio characteristics to inform workflow decisions"""
     
     async def analyze_audio(self, audio_path: str) -> Dict[str, Any]:
-        """Perform comprehensive audio analysis"""
+        """Perform comprehensive audio analysis.
+        NOTE: Current implementation is a mock.
+        A real implementation should use:
+        from app.utils.audio_processing import AudioProcessor
+        metadata = await AudioProcessor.extract_metadata_async(audio_path)
+        and then perform further analysis based on metadata.
+        """
         
         try:
             # In a real implementation, this would use librosa and other audio libraries

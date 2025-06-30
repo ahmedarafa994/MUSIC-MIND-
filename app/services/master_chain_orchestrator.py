@@ -14,6 +14,10 @@ from app.services.audio_analyzer import AudioAnalyzer
 from app.services.quality_assessor import QualityAssessor
 from app.services.workflow_optimizer import WorkflowOptimizer
 from app.core.exceptions import ProcessingError, ModelUnavailableError
+from app.utils.audio_processing import AudioProcessor # For loading and saving audio
+from app.utils.file_utils import FileManager # For ensuring directory (if needed for temp save)
+from fastapi.concurrency import run_in_threadpool # For sf.write if not directly async
+import soundfile as sf # For saving audio
 
 logger = structlog.get_logger()
 
@@ -355,28 +359,30 @@ class MasterChainOrchestrator:
                 job.status = status
             
             # Estimate completion time
-            if progress > 0:
+            if progress > 0 and job.created_at: # Ensure job.created_at is not None
                 elapsed = (datetime.utcnow() - job.created_at).total_seconds()
-                estimated_total = elapsed * (100 / progress)
-                job.estimated_completion = job.created_at + timedelta(seconds=estimated_total)
+                if progress > 0: # Avoid division by zero
+                    estimated_total = elapsed * (100 / progress)
+                    job.estimated_completion = job.created_at + timedelta(seconds=estimated_total)
 
     async def _load_audio_data(self, audio_path: str) -> Any:
-        """Load audio data from file path"""
-        try:
-            import librosa
-            audio_data, sample_rate = librosa.load(audio_path, sr=None)
-            return {
-                'audio': audio_data,
-                'sample_rate': sample_rate,
-                'duration': len(audio_data) / sample_rate
-            }
-        except ImportError:
-            # Fallback if librosa is not available
+        """Load audio data from file path asynchronously"""
+        # Uses the new async method from AudioProcessor
+        audio_array, sample_rate = await AudioProcessor.load_audio_async(audio_path)
+        if audio_array is None or sample_rate is None:
+            logger.error("Failed to load audio data", path=audio_path)
+            # Fallback or error handling
             return {
                 'audio': np.random.randn(44100 * 30),  # 30 seconds of random audio
                 'sample_rate': 44100,
-                'duration': 30.0
+                'duration': 30.0,
+                'error': 'Failed to load audio'
             }
+        return {
+            'audio': audio_array,
+            'sample_rate': sample_rate,
+            'duration': len(audio_array) / sample_rate
+        }
 
     async def _create_workflow_plan(
         self, 
@@ -528,11 +534,26 @@ class MasterChainOrchestrator:
         
         # Save final audio file
         output_filename = f"mastered_{uuid.uuid4()}.wav"
-        output_path = f"/tmp/{output_filename}"
+        # Ensure TEMP_PATH is defined in settings and directory exists
+        temp_dir = getattr(settings, 'TEMP_PATH', '/tmp')
+        await FileManager.ensure_directory_async(temp_dir) # Ensure temp_dir exists
+        output_path = FileManager.generate_unique_filename(output_filename, directory=temp_dir)
+        output_path = os.path.join(temp_dir, output_filename) # Correctly join
         
-        # In a real implementation, save the audio data to file
-        # For now, we'll simulate this
-        
+        if final_audio_data and 'audio' in final_audio_data and 'sample_rate' in final_audio_data:
+            audio_array = final_audio_data['audio']
+            sample_rate = final_audio_data['sample_rate']
+            try:
+                # sf.write is synchronous, so wrap it
+                await run_in_threadpool(sf.write, output_path, audio_array, sample_rate)
+                logger.info("Final audio saved", path=output_path)
+            except Exception as e:
+                logger.error("Failed to save final audio", path=output_path, error=str(e))
+                output_path = None # Indicate saving failed
+        else:
+            logger.warning("No audio data to save in _compile_final_results")
+            output_path = None
+
         return {
             "output_file_path": output_path,
             "output_filename": output_filename,

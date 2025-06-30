@@ -225,15 +225,14 @@ class CRUDAudioFile(CRUDBase[AudioFile, AudioFileCreate, AudioFileUpdate]):
 audio_file = CRUDAudioFile(AudioFile)
 
 
-# Synchronous function for creating derived audio file records
-# This is to be called from the audio_processing_api.py which uses synchronous DB sessions for now.
-def create_sync_derived_audio_file(
-    db: Session, # Note: Synchronous Session
+# Asynchronous function for creating derived audio file records
+async def create_async_derived_audio_file( # Renamed and made async
+    db: AsyncSession, # Changed to AsyncSession
     *,
     user_id: uuid.UUID,
-    original_audio_file_model: AudioFile, # The SQLAlchemy model instance of the original file
-    new_filename: str, # System-generated unique name for storage
-    new_original_filename: str, # User-facing name
+    original_audio_file_model: AudioFile,
+    new_filename: str,
+    new_original_filename: str,
     new_file_path: str,
     new_file_size: int,
     new_mime_type: str,
@@ -249,18 +248,13 @@ def create_sync_derived_audio_file(
     mood: Optional[str] = None
 ) -> AudioFile:
     """
-    Creates a new audio file record in the database using a synchronous session.
+    Creates a new audio file record in the database using an asynchronous session.
     """
     genre_to_set = genre if genre is not None else original_audio_file_model.genre
     mood_to_set = mood if mood is not None else original_audio_file_model.mood
 
-    # Assuming AudioFile model has fields:
-    # id (default=uuid.uuid4()), created_at (default=now), updated_at (default=now, onupdate=now)
-    # play_count, download_count (default to 0 or None)
-    # Ensure 'bit_rate', 'source_audio_id', 'processing_log' fields exist in AudioFile model if used.
-
     db_obj = AudioFile(
-        id=uuid.uuid4(), # Explicitly generate UUID here if model doesn't auto-gen on non-commit
+        id=uuid.uuid4(),
         user_id=user_id,
         filename=new_filename,
         original_filename=new_original_filename,
@@ -274,18 +268,17 @@ def create_sync_derived_audio_file(
         sample_rate=sample_rate,
         channels=channels,
         bit_rate=bit_rate,
-        # source_audio_id=original_audio_file_model.id, # Uncomment if model has this field
         processing_log=processing_log,
         genre=genre_to_set,
         mood=mood_to_set,
-        is_public=original_audio_file_model.is_public, # Inherit publicity
+        is_public=original_audio_file_model.is_public,
         is_deleted=False
     )
     db.add(db_obj)
-    db.commit()
-    db.refresh(db_obj)
+    await db.commit() # Added await
+    await db.refresh(db_obj) # Added await
     logger.info(
-        "SYNC Derived audio file created",
+        "ASYNC Derived audio file created", # Changed log message
         new_audio_file_id=db_obj.id,
         original_audio_file_id=original_audio_file_model.id,
         user_id=user_id

@@ -1,25 +1,27 @@
 from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession # Changed import
 import uuid
 from datetime import datetime
 
-from app.db.database import get_db
-from app.crud import agent_session as crud_session
+from app.db.database import get_async_db # Changed import
+from app.crud.agent_session import agent_session as async_crud_agent_session # Changed import
+from app.crud.crud_audio_file import audio_file as async_crud_audio_file # For mastering session
 from app.schemas import (
     AgentSessionCreate, AgentSessionResponse, AgentSessionDetail,
     MusicGenerationRequest, MusicGenerationResponse,
-    MasteringRequest, AudioAnalysisRequest
+    MasteringRequest, # AudioAnalysisRequest not used yet
 )
 from app.core.security import get_current_active_user
 from app.models.user import User
+from app.models.agent_session import SessionStatus # For checking is_complete
 
 router = APIRouter()
 
 @router.post("/", response_model=AgentSessionResponse, status_code=status.HTTP_201_CREATED)
-def create_session(
+async def create_session( # Added async
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db), # Changed
     session_in: AgentSessionCreate,
     current_user: User = Depends(get_current_active_user),
     background_tasks: BackgroundTasks
@@ -27,28 +29,26 @@ def create_session(
     """
     Create new agent session
     """
-    # Check user limits
     if not current_user.can_make_api_call():
         raise HTTPException(
             status_code=429,
             detail="API usage limit exceeded"
         )
     
-    # Create session
-    session = crud_session.create_with_user(db, obj_in=session_in, user_id=current_user.id)
+    session = await async_crud_agent_session.create_with_user(db, obj_in=session_in, user_id=current_user.id) # await
     
-    # Increment user API usage
     current_user.increment_api_usage()
-    db.commit()
+    db.add(current_user) # Add to session for commit
+    await db.commit() # await
+    await db.refresh(current_user) # refresh if needed
     
-    # Start session processing in background
     background_tasks.add_task(process_session, session.id)
     
     return session
 
 @router.get("/", response_model=List[AgentSessionResponse])
-def read_sessions(
-    db: Session = Depends(get_db),
+async def read_sessions( # Added async
+    db: AsyncSession = Depends(get_async_db), # Changed
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_active_user),
@@ -56,20 +56,20 @@ def read_sessions(
     """
     Retrieve user's agent sessions
     """
-    sessions = crud_session.get_by_user(db, user_id=current_user.id, skip=skip, limit=limit)
+    sessions = await async_crud_agent_session.get_by_user(db, user_id=current_user.id, skip=skip, limit=limit) # await
     return sessions
 
 @router.get("/{session_id}", response_model=AgentSessionDetail)
-def read_session(
+async def read_session( # Added async
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db), # Changed
     session_id: uuid.UUID,
     current_user: User = Depends(get_current_active_user),
 ) -> Any:
     """
     Get agent session by ID
     """
-    session = crud_session.get(db, id=session_id)
+    session = await async_crud_agent_session.get(db, id=session_id) # await
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
@@ -79,9 +79,9 @@ def read_session(
     return session
 
 @router.post("/{session_id}/cancel")
-def cancel_session(
+async def cancel_session( # Added async
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db), # Changed
     session_id: uuid.UUID,
     reason: Optional[str] = None,
     current_user: User = Depends(get_current_active_user),
@@ -89,35 +89,36 @@ def cancel_session(
     """
     Cancel agent session
     """
-    session = crud_session.get(db, id=session_id)
+    session = await async_crud_agent_session.get(db, id=session_id) # await
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
     if session.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    if session.is_complete:
-        raise HTTPException(status_code=400, detail="Session already completed")
+    # Check using Enum members for clarity
+    if session.status in [SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED]:
+        raise HTTPException(status_code=400, detail="Session already completed or cancelled")
     
-    crud_session.cancel_session(db, session_id=session_id, reason=reason)
+    await async_crud_agent_session.cancel_session(db, session_id=session_id, reason=reason) # await
     
     return {"message": "Session cancelled successfully"}
 
 @router.get("/active/", response_model=List[AgentSessionResponse])
-def read_active_sessions(
-    db: Session = Depends(get_db),
+async def read_active_sessions( # Added async
+    db: AsyncSession = Depends(get_async_db), # Changed
     current_user: User = Depends(get_current_active_user),
 ) -> Any:
     """
     Get user's active sessions
     """
-    sessions = crud_session.get_active_sessions(db, user_id=current_user.id)
+    sessions = await async_crud_agent_session.get_active_sessions(db, user_id=current_user.id) # await
     return sessions
 
 @router.post("/music-generation", response_model=MusicGenerationResponse)
-def create_music_generation_session(
+async def create_music_generation_session( # Added async
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db), # Changed
     request_data: MusicGenerationRequest,
     current_user: User = Depends(get_current_active_user),
     background_tasks: BackgroundTasks
@@ -125,44 +126,44 @@ def create_music_generation_session(
     """
     Create music generation session
     """
-    # Check user limits
     if not current_user.can_make_api_call():
         raise HTTPException(
             status_code=429,
             detail="API usage limit exceeded"
         )
     
-    # Create session
     session_data = AgentSessionCreate(
         session_type="music_generation",
         user_prompt=request_data.prompt,
         audio_file_id=request_data.reference_file_id
     )
     
-    session = crud_session.create_with_user(db, obj_in=session_data, user_id=current_user.id)
+    session = await async_crud_agent_session.create_with_user(db, obj_in=session_data, user_id=current_user.id) # await
     
-    # Store generation parameters
     session.parsed_requirements = request_data.dict(exclude={"prompt", "reference_file_id"})
-    db.commit()
+    db.add(session) # Add to session for commit
+    # No need to commit here if create_with_user already commits.
+    # If create_with_user doesn't commit, then: await db.commit(); await db.refresh(session)
     
-    # Increment user API usage
     current_user.increment_api_usage()
-    db.commit()
+    db.add(current_user)
+    await db.commit() # This commit will save both session and user changes
+    await db.refresh(session)
+    await db.refresh(current_user)
     
-    # Start processing in background
     background_tasks.add_task(process_music_generation, session.id, request_data)
     
     return MusicGenerationResponse(
         session_id=session.id,
         status="queued",
-        estimated_completion_time=300,  # 5 minutes estimate
+        estimated_completion_time=300,
         queue_position=1
     )
 
 @router.post("/mastering", response_model=MusicGenerationResponse)
-def create_mastering_session(
+async def create_mastering_session( # Added async
     *,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db), # Changed
     request_data: MasteringRequest,
     current_user: User = Depends(get_current_active_user),
     background_tasks: BackgroundTasks
@@ -170,50 +171,46 @@ def create_mastering_session(
     """
     Create mastering session
     """
-    # Check user limits
     if not current_user.can_make_api_call():
         raise HTTPException(
             status_code=429,
             detail="API usage limit exceeded"
         )
     
-    # Validate audio file exists and belongs to user
-    from app.crud import audio_file as crud_audio_file
-    audio_file = crud_audio_file.get(db, id=request_data.audio_file_id)
+    audio_file = await async_crud_audio_file.get(db, id=request_data.audio_file_id) # await
     if not audio_file:
         raise HTTPException(status_code=404, detail="Audio file not found")
     
     if audio_file.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
-    # Create session
     session_data = AgentSessionCreate(
         session_type="mastering",
         user_prompt=f"Master audio file {audio_file.filename}",
         audio_file_id=request_data.audio_file_id
     )
     
-    session = crud_session.create_with_user(db, obj_in=session_data, user_id=current_user.id)
+    session = await async_crud_agent_session.create_with_user(db, obj_in=session_data, user_id=current_user.id) # await
     
-    # Store mastering parameters
     session.parsed_requirements = request_data.dict(exclude={"audio_file_id"})
-    db.commit()
+    db.add(session)
     
-    # Increment user API usage
     current_user.increment_api_usage()
-    db.commit()
+    db.add(current_user)
+    await db.commit() # Commit both session and user changes
+    await db.refresh(session)
+    await db.refresh(current_user)
     
-    # Start processing in background
     background_tasks.add_task(process_mastering, session.id, request_data)
     
     return MusicGenerationResponse(
         session_id=session.id,
         status="queued",
-        estimated_completion_time=120,  # 2 minutes estimate
+        estimated_completion_time=120,
         queue_position=1
     )
 
-# Background task functions
+# Background task functions (already async, no changes needed for their signature)
 async def process_session(session_id: uuid.UUID):
     """Process agent session in background"""
     # This would contain the actual AI processing logic

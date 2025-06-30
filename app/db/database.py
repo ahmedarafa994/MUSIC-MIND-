@@ -93,7 +93,7 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
             yield session
-            await session.commit()
+            # await session.commit() # Commit should be handled by the endpoint logic after all operations.
         except Exception as e:
             logger.error(f"Async database session error: {e}")
             await session.rollback()
