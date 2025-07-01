@@ -12,7 +12,7 @@ import {
   Grid,
   List
 } from 'lucide-react';
-import { apiClient } from '../../services/api';
+import api from '../../services/api';
 import { useAudio } from '../../contexts/AudioContext';
 import LoadingSpinner from '../../components/UI/LoadingSpinner';
 
@@ -29,7 +29,7 @@ export default function AudioLibrary() {
       if (searchQuery) params.append('search', searchQuery);
       if (selectedGenre) params.append('genre', selectedGenre);
       
-      const response = await apiClient.get(`/files?${params.toString()}`);
+      const response = await api.get(`/files?${params.toString()}`);
       return response.data;
     }
   });
@@ -44,7 +44,7 @@ export default function AudioLibrary() {
 
   const handleDownload = async (fileId: string, filename: string) => {
     try {
-      const response = await apiClient.get(`/files/${fileId}/download`, {
+      const response = await api.get(`/files/${fileId}/download`, {
         responseType: 'blob'
       });
       

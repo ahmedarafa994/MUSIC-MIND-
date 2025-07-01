@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Play, Pause, Download, Settings, Wand2, Clock, Music, Volume2, RotateCcw, Trash2 } from 'lucide-react';
-import { apiClient } from '../../services/api';
+import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
@@ -69,14 +69,14 @@ export default function MusicGenerator() {
   const { data: generationHistory = [], refetch } = useQuery({
     queryKey: ['generations'],
     queryFn: async () => {
-      const response = await apiClient.get('/music/generations');
+      const response = await api.get('/music/generations');
       return response.data;
     },
   });
 
   const generateMutation = useMutation({
     mutationFn: async (request: GenerationRequest) => {
-      const response = await apiClient.post('/music/generate', request);
+      const response = await api.post('/music/generate', request);
       return response.data;
     },
     onSuccess: (data) => {
@@ -91,7 +91,7 @@ export default function MusicGenerator() {
 
   const deleteMutation = useMutation({
     mutationFn: async (generationId: string) => {
-      await apiClient.delete(`/music/generations/${generationId}`);
+      await api.delete(`/music/generations/${generationId}`);
     },
     onSuccess: () => {
       toast.success('Generation deleted');
@@ -105,7 +105,7 @@ export default function MusicGenerator() {
   const pollGenerationStatus = async (generationId: string) => {
     const interval = setInterval(async () => {
       try {
-        const response = await apiClient.get(`/music/generations/${generationId}/status`);
+        const response = await api.get(`/music/generations/${generationId}/status`);
         const result = response.data;
         
         if (result.status === 'completed' || result.status === 'failed') {

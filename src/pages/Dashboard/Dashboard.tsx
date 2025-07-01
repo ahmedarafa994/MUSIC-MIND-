@@ -11,7 +11,7 @@ import {
   Download
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { apiClient } from '../../services/api';
+import api from '../../services/api';
 import LoadingSpinner from '../../components/UI/LoadingSpinner';
 import { Link } from 'react-router-dom';
 
@@ -21,7 +21,7 @@ export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['user-stats'],
     queryFn: async () => {
-      const response = await apiClient.get('/users/me/stats');
+      const response = await api.get('/users/me/stats');
       return response.data;
     }
   });
@@ -29,7 +29,7 @@ export default function Dashboard() {
   const { data: recentGenerations, isLoading: generationsLoading } = useQuery({
     queryKey: ['recent-generations'],
     queryFn: async () => {
-      const response = await apiClient.get('/files?limit=5&sort_by=created_at');
+      const response = await api.get('/files?limit=5&sort_by=created_at');
       return response.data;
     }
   });
@@ -37,7 +37,7 @@ export default function Dashboard() {
   const { data: agentStatus } = useQuery({
     queryKey: ['agent-status'],
     queryFn: async () => {
-      const response = await apiClient.get('/music/agent/status');
+      const response = await api.get('/music/agent/status');
       return response.data;
     },
     refetchInterval: 30000 // Refresh every 30 seconds
