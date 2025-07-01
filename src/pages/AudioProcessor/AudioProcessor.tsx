@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Upload, Play, Pause, Download, Settings, Headphones, Volume2, AudioWaveform as Waveform, Sliders, Zap, CheckCircle, AlertCircle, Clock, X, FileAudio, Loader2 } from 'lucide-react'eact';
+import { Upload, Play, Pause, Download, Settings, Headphones, Volume2, AudioWaveform as Waveform, Sliders, Zap, CheckCircle, AlertCircle, Clock, X, FileAudio, Loader2, RefreshCw, Trash2, Music } from 'lucide-react';
 import { apiClient } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAudio } from '../../contexts/AudioContext';
