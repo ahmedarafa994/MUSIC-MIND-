@@ -4,21 +4,21 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
-import Navbar from './components/layout/Navbar';
-import Sidebar from './components/layout/Sidebar';
+import Navbar from './components/Layout/Navbar';
+import Sidebar from './components/Layout/Sidebar';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 
 // Pages
 import HomePage from './pages/HomePage';
-import LoginPage from './pages/auth/LoginPage';
-import RegisterPage from './pages/auth/RegisterPage';
-import DashboardPage from './pages/DashboardPage';
+import LoginPage from './pages/Auth/LoginPage';
+import RegisterPage from './pages/Auth/RegisterPage';
+import DashboardPage from './pages/Dashboard/Dashboard';
 import UploadPage from './pages/UploadPage';
-import LibraryPage from './pages/LibraryPage';
+import LibraryPage from './pages/AudioLibrary/AudioLibrary';
 import MasteringPage from './pages/MasteringPage';
-import GeneratePage from './pages/GeneratePage';
-import ProfilePage from './pages/ProfilePage';
-import SettingsPage from './pages/SettingsPage';
+import GeneratePage from './pages/MusicGenerator/MusicGenerator';
+import ProfilePage from './pages/Profile/UserProfile';
+import SettingsPage from './pages/Settings';
 
 import './App.css';
 
